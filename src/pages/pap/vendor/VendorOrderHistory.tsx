@@ -1,15 +1,34 @@
 // src/pages/pap/vendor/VendorOrderHistory.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import { DataTable } from "@/components/ui/data-table";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { Eye, Loader2, Package, Check, X, Truck, ShieldCheck, Ban } from "lucide-react";
+import {
+  Eye,
+  Loader2,
+  Package,
+  Check,
+  X,
+  Truck,
+  ShieldCheck,
+  Ban,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
-
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type Segment = "all" | "affordable" | "midrange" | "luxury";
 type Status =
@@ -21,49 +40,93 @@ type Status =
   | "shipped"
   | "delivered"
   | "cancelled"
-  | "returned"
-  | "rejected";
+  | "rejected"
+  | "pending"
+  | "reviewing";
 
 type VendorDetails = {
-  vendorId: string;
-  vendorName: string;
-  vendorSegment: Exclude<Segment, "all">;
+  _id?: string;
+  companyName?: string;
+  legalName?: string;
+  companyType?: string;
+  telephone?: string;
+  mobile?: string;
+  email?: string;
+  country?: string;
+  city?: string;
+  businessNature?: string;
+  estYear?: number | null;
+  relation?: string;
+  employees?: string;
+  pan?: string;
+  gst?: string;
+  items?: string;
+  legalDisputes?: string;
+  exportCountries?: string;
+  description?: string;
+  documentUrl?: string;
+  status?: "pending" | "approved" | "rejected";
+
+  vendorId?: string;
+  vendorName?: string;
+  vendorSegment?: Exclude<Segment, "all">;
   payoutStatus?: "pending" | "paid" | "hold";
 };
 
 type OrderItem = {
   productId: string;
-  quantity: number;
   name?: string;
+  sku?: string;
   image?: string;
-  price?: number;
-  discountPercent?: number;
-  discountAmount?: number;
-  finalPrice?: number;
-  productSnapshot?: {
-    name?: string;
-    price?: number;
-    image?: string;
-    category?: string;
-    inStock?: boolean;
-    colors?: string[];
-  };
+  tier?: string;
+  category?: string;
+  subcategory?: string;
+  material?: string;
+  color?: string;
+  size?: string;
+  quantity: number;
+  unitPrice?: number;
+  lineTotal?: number;
+};
+
+type ShippingAddress = {
+  fullName?: string;
+  phone?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
 };
 
 type Order = {
   _id: string;
-  vendor: VendorDetails;
+  orderNumber?: string;
+  status: string;
+  note?: string;
+
+  vendor: VendorDetails | null;
   items: OrderItem[];
-  pricing?: { subtotal?: number; gstRate?: number; gstAmount?: number; total?: number };
-  totals?: { total?: number };
-  payment?: { method?: string; status?: string; transactionId?: string };
-  status: string; // can be "Placed" etc
+  shippingAddress?: ShippingAddress;
+
+  pricing?: {
+    subtotal?: number;
+    gstRate?: number;
+    gstAmount?: number;
+    total?: number;
+  };
+
+  meta?: {
+    forwardedToAdmin?: boolean;
+  };
+
   createdAt?: string;
   updatedAt?: string;
 };
 
 const API_BASE =
-  (import.meta as any).env?.VITE_BASE_URL?.replace(/\/$/, "") || "https://api.jsgallor.com";
+  (import.meta as any).env?.VITE_BASE_URL?.replace(/\/$/, "") ||
+  "https://api.jsgallor.com";
 const VENDOR_ORDERS_API = `${API_BASE}/api/admin/vendor-orders`;
 
 const safeJson = async (res: Response) => {
@@ -85,11 +148,20 @@ const formatCurrency = (amount = 0) =>
   }).format(Number(amount || 0));
 
 const formatDate = (iso?: string) =>
-  iso
-    ? new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" })
-    : "—";
+  iso ? new Date(iso).toLocaleString("en-IN") : "—";
 
-const getOrderNumber = (order: Order) => `#${order._id.slice(-6).toUpperCase()}`;
+const getOrderNumber = (order: Order) =>
+  order.orderNumber || `#${order._id.slice(-6).toUpperCase()}`;
+
+const inferVendorSegment = (
+  vendor?: VendorDetails | null
+): Exclude<Segment, "all"> => {
+  const raw = String(vendor?.vendorSegment || "").toLowerCase();
+  if (raw === "affordable" || raw === "midrange" || raw === "luxury") {
+    return raw;
+  }
+  return "affordable";
+};
 
 const vendorSegmentLabel = (seg?: string) => {
   const s = normSeg(seg);
@@ -106,22 +178,22 @@ const payoutBadge = (status?: VendorDetails["payoutStatus"]) => {
   return "Pending";
 };
 
-const paymentLabel = (o: Order) => {
-  const method = (o.payment?.method || "").toString().trim();
-  const status = (o.payment?.status || "").toString().trim();
-  if (!method && !status) return "—";
-  return `${method || "—"}${status ? ` / ${status}` : ""}`.toUpperCase();
-};
+const vendorNameLabel = (vendor?: VendorDetails | null) =>
+  vendor?.companyName || vendor?.legalName || vendor?.vendorName || "—";
+
+const vendorIdLabel = (vendor?: VendorDetails | null) =>
+  String(vendor?.vendorId || vendor?._id || "")
+    .slice(-8)
+    .toUpperCase();
 
 const orderItemsText = (o: Order) =>
   (o.items || [])
     .slice(0, 3)
-    .map((i) => `${i.name || i.productSnapshot?.name || "Item"} × ${i.quantity}`)
+    .map((i) => `${i.name || "Item"} × ${i.quantity}`)
     .join(", ")
     .concat(o.items?.length > 3 ? ` +${o.items.length - 3} more` : "") || "—";
 
-const getOrderTotal = (o: Order) =>
-  Number(o.totals?.total ?? o.pricing?.total ?? 0);
+const getOrderTotal = (o: Order) => Number(o.pricing?.total ?? 0);
 
 function getAdminToken() {
   return (
@@ -134,16 +206,19 @@ function getAdminToken() {
 
 const isTerminalStatus = (s?: string) => {
   const ns = normStatus(s);
-  return ns === "delivered" || ns === "cancelled" || ns === "rejected" || ns === "returned";
+  return ns === "delivered" || ns === "cancelled" || ns === "rejected";
 };
 
 const nextActionButtons = (s?: string) => {
   switch (normStatus(s)) {
     case "placed":
+    case "pending":
       return ["approve", "reject", "cancel"] as const;
     case "approved":
       return ["confirm", "cancel"] as const;
     case "confirmed":
+      return ["processing", "ship", "cancel"] as const;
+    case "processing":
       return ["ship", "cancel"] as const;
     case "shipped":
       return ["deliver"] as const;
@@ -164,34 +239,45 @@ export default function VendorOrderHistory() {
 
   const authHeaders = () => {
     const token = getAdminToken();
-    return token ? { Authorization: `Bearer ${token}` } : {};
+    return {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
   };
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
 
       const qs = new URLSearchParams();
-      if (segment !== "all") qs.set("segment", segment); // backend can filter
-      if (statusFilter !== "all") {
-        // backend might expect "Placed" etc; but we’ll also filter client-side
-        qs.set("status", statusFilter);
-      }
+      if (segment !== "all") qs.set("segment", segment);
+      if (statusFilter !== "all") qs.set("status", statusFilter);
 
       const url = `${VENDOR_ORDERS_API}?${qs.toString()}`;
-
       const res = await fetch(url, { headers: authHeaders() });
       const data = await safeJson(res);
-      if (!res.ok) throw new Error(data?.message || "Failed to fetch vendor orders");
 
-      const list: Order[] = data?.orders || data?.data || data || [];
+      if (!res.ok) {
+        throw new Error(data?.message || "Failed to fetch vendor orders");
+      }
 
-      // ✅ HARD FILTER client-side (handles "Placed" vs "placed")
+      const list: Order[] = Array.isArray(data?.orders)
+        ? data.orders
+        : Array.isArray(data?.data)
+          ? data.data
+          : Array.isArray(data)
+            ? data
+            : [];
+
       const filtered = list.filter((o) => {
         const okSeg =
-          segment === "all" ? true : normSeg(o.vendor?.vendorSegment) === segment;
+          segment === "all"
+            ? true
+            : normSeg(o.vendor?.vendorSegment) === segment;
         const okStatus =
-          statusFilter === "all" ? true : normStatus(o.status) === statusFilter;
+          statusFilter === "all"
+            ? true
+            : normStatus(o.status) === statusFilter;
         return okSeg && okStatus;
       });
 
@@ -205,46 +291,43 @@ export default function VendorOrderHistory() {
     } catch (err: any) {
       toast({
         title: "Error",
-        description: err.message || "Failed to load vendor orders",
+        description: err?.message || "Failed to load vendor orders",
         variant: "destructive",
       });
       setOrders([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [segment, statusFilter]);
 
   useEffect(() => {
     fetchOrders();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segment, statusFilter]);
+  }, [fetchOrders]);
 
-  /** ✅ Approve endpoint */
   const approveOrder = async (order: Order) => {
     setActionId(order._id);
     try {
-      const token = getAdminToken();
-
       const res = await fetch(`${VENDOR_ORDERS_API}/${order._id}/approve`, {
         method: "PATCH",
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: authHeaders(),
       });
 
       const data = await safeJson(res);
       if (!res.ok) throw new Error(data?.message || "Approve failed");
 
-      toast({ title: "Approved", description: data?.message || "Order approved" });
+      toast({
+        title: "Approved",
+        description: data?.message || "Order approved",
+      });
 
-      // remove from list if filter is "placed"
       const updated: Order = (data?.order || data) as Order;
+
       setOrders((prev) =>
-        prev
-          .map((o) => (o._id === order._id ? { ...o, ...updated } : o))
-          .filter((o) => (statusFilter === "placed" ? normStatus(o.status) === "placed" : true))
+        prev.map((o) => (o._id === order._id ? { ...o, ...updated } : o))
       );
-      setViewOrder((prev) => (prev?._id === order._id ? { ...prev, ...updated } : prev));
+      setViewOrder((prev) =>
+        prev?._id === order._id ? { ...prev, ...updated } : prev
+      );
     } catch (err: any) {
       toast({
         title: "Approve failed",
@@ -256,19 +339,14 @@ export default function VendorOrderHistory() {
     }
   };
 
-  /** ✅ Reject endpoint */
   const rejectOrder = async (order: Order) => {
     setActionId(order._id);
     try {
       const reason = window.prompt("Reason (optional):") || "";
-      const token = getAdminToken();
 
       const res = await fetch(`${VENDOR_ORDERS_API}/${order._id}/reject`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: authHeaders(),
         body: JSON.stringify({ reason }),
       });
 
@@ -282,12 +360,13 @@ export default function VendorOrderHistory() {
       });
 
       const updated: Order = (data?.order || data) as Order;
+
       setOrders((prev) =>
-        prev
-          .map((o) => (o._id === order._id ? { ...o, ...updated } : o))
-          .filter((o) => (statusFilter === "placed" ? normStatus(o.status) === "placed" : true))
+        prev.map((o) => (o._id === order._id ? { ...o, ...updated } : o))
       );
-      setViewOrder((prev) => (prev?._id === order._id ? { ...prev, ...updated } : prev));
+      setViewOrder((prev) =>
+        prev?._id === order._id ? { ...prev, ...updated } : prev
+      );
     } catch (err: any) {
       toast({
         title: "Reject failed",
@@ -299,33 +378,31 @@ export default function VendorOrderHistory() {
     }
   };
 
-  /** ✅ Optional: cancel via status endpoint (only if your backend supports it)
-   * If you don’t have this endpoint, remove this button or tell me your cancel API.
-   */
   const updateStatus = async (order: Order, status: string) => {
     setActionId(order._id);
     try {
-      const token = getAdminToken();
-
       const res = await fetch(`${VENDOR_ORDERS_API}/${order._id}/status`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: authHeaders(),
         body: JSON.stringify({ status }),
       });
 
       const data = await safeJson(res);
       if (!res.ok) throw new Error(data?.message || "Failed to update status");
 
-      toast({ title: "Updated", description: data?.message || "Order updated" });
+      toast({
+        title: "Updated",
+        description: data?.message || "Order updated",
+      });
 
       const updated: Order = (data?.order || data) as Order;
+
       setOrders((prev) =>
         prev.map((o) => (o._id === order._id ? { ...o, ...updated } : o))
       );
-      setViewOrder((prev) => (prev?._id === order._id ? { ...prev, ...updated } : prev));
+      setViewOrder((prev) =>
+        prev?._id === order._id ? { ...prev, ...updated } : prev
+      );
     } catch (err: any) {
       toast({
         title: "Update failed",
@@ -349,9 +426,9 @@ export default function VendorOrderHistory() {
         header: "Vendor",
         render: (o: Order) => (
           <div className="leading-tight">
-            <p className="font-medium">{o.vendor?.vendorName || "—"}</p>
+            <p className="font-medium">{vendorNameLabel(o.vendor)}</p>
             <p className="text-xs text-muted-foreground font-mono">
-              {String(o.vendor?.vendorId || "").slice(-8).toUpperCase()}
+              {vendorIdLabel(o.vendor) || "—"}
             </p>
           </div>
         ),
@@ -361,41 +438,38 @@ export default function VendorOrderHistory() {
         header: "Segment",
         render: (o: Order) => (
           <span className="text-xs px-2 py-1 rounded-md border">
-            {vendorSegmentLabel(o.vendor?.vendorSegment)}
+            {vendorSegmentLabel(inferVendorSegment(o.vendor))}
           </span>
         ),
       },
       {
-        key: "payout",
-        header: "Payout",
+        key: "vendorStatus",
+        header: "Vendor Status",
         render: (o: Order) => (
-          <span className="text-xs px-2 py-1 rounded-md border">
-            {payoutBadge(o.vendor?.payoutStatus)}
+          <span className="text-xs px-2 py-1 rounded-md border capitalize">
+            {o.vendor?.status || "—"}
           </span>
         ),
       },
       {
-        key: "_id",
-        header: "Order ID",
-        render: (o: Order) => <span className="font-mono font-medium">{getOrderNumber(o)}</span>,
+        key: "orderNumber",
+        header: "Order No",
+        render: (o: Order) => (
+          <span className="font-mono font-medium">{getOrderNumber(o)}</span>
+        ),
       },
       {
         key: "items",
         header: "Items",
-        render: (o: Order) => <span className="text-sm">{orderItemsText(o)}</span>,
+        render: (o: Order) => (
+          <span className="text-sm">{orderItemsText(o)}</span>
+        ),
       },
       {
         key: "total",
         header: "Amount",
-        render: (o: Order) => <span className="font-medium">{formatCurrency(getOrderTotal(o))}</span>,
-      },
-      {
-        key: "payment",
-        header: "Payment",
         render: (o: Order) => (
-          <Badge variant="secondary" className="text-xs">
-            {paymentLabel(o)}
-          </Badge>
+          <span className="font-medium">{formatCurrency(getOrderTotal(o))}</span>
         ),
       },
       {
@@ -426,13 +500,19 @@ export default function VendorOrderHistory() {
 
   const tableData = useMemo(() => orders, [orders]);
 
+  const selectedItemsTotal =
+    viewOrder?.items?.reduce((sum, it) => {
+      return sum + Number(it.lineTotal ?? Number(it.unitPrice || 0) * Number(it.quantity || 0));
+    }, 0) ?? 0;
+
+  const selectedTotal = Number(viewOrder?.pricing?.total ?? selectedItemsTotal);
+
   return (
     <AdminLayout
       panelType="pap-vendor"
       title="Vendor Order History"
       subtitle="View and manage vendor orders only"
     >
-      {/* Filters + Refresh */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
         <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
           <div className="flex items-center gap-2">
@@ -458,14 +538,15 @@ export default function VendorOrderHistory() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
                 <SelectItem value="placed">Placed</SelectItem>
+                <SelectItem value="reviewing">Reviewing</SelectItem>
                 <SelectItem value="approved">Approved</SelectItem>
                 <SelectItem value="confirmed">Confirmed</SelectItem>
                 <SelectItem value="processing">Processing</SelectItem>
                 <SelectItem value="shipped">Shipped</SelectItem>
                 <SelectItem value="delivered">Delivered</SelectItem>
                 <SelectItem value="cancelled">Cancelled</SelectItem>
-                <SelectItem value="returned">Returned</SelectItem>
                 <SelectItem value="rejected">Rejected</SelectItem>
               </SelectContent>
             </Select>
@@ -484,22 +565,20 @@ export default function VendorOrderHistory() {
         </div>
       </div>
 
-      {/* Table */}
       <DataTable
         data={tableData}
         columns={columns}
-        searchKey="_id"
+        searchKey="orderNumber"
         searchPlaceholder="Search vendor orders..."
         actions={actions}
       />
 
-      {/* View Modal */}
       <Dialog open={!!viewOrder} onOpenChange={() => setViewOrder(null)}>
         <DialogContent
           className="
-            w-[95vw] sm:w-[90vw] lg:w-[900px]
+            w-[95vw] sm:w-[90vw] lg:w-[1100px]
             max-w-[95vw]
-            h-[85vh] sm:h-[80vh]
+            h-[88vh] sm:h-[84vh]
             p-0 overflow-hidden
           "
         >
@@ -516,13 +595,10 @@ export default function VendorOrderHistory() {
               </div>
 
               {viewOrder ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap justify-end">
                   <span className="text-xs px-2 py-1 rounded-md border">
-                    {vendorSegmentLabel(viewOrder.vendor?.vendorSegment)}
+                    {vendorSegmentLabel(inferVendorSegment(viewOrder.vendor))}
                   </span>
-                  <Badge variant="secondary" className="text-xs">
-                    {paymentLabel(viewOrder)}
-                  </Badge>
                   <StatusBadge status={viewOrder.status} />
                 </div>
               ) : null}
@@ -534,39 +610,195 @@ export default function VendorOrderHistory() {
               <div className="text-sm text-muted-foreground">No order selected.</div>
             ) : (
               <>
-                {/* Summary */}
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                   <div className="rounded-lg border p-3">
                     <div className="text-xs text-muted-foreground">Vendor</div>
-                    <div className="mt-1 font-medium">{viewOrder.vendor?.vendorName || "—"}</div>
+                    <div className="mt-1 font-medium">{vendorNameLabel(viewOrder.vendor)}</div>
                     <div className="mt-1 text-xs font-mono text-muted-foreground">
-                      {String(viewOrder.vendor?.vendorId || "").slice(-8).toUpperCase()}
+                      {vendorIdLabel(viewOrder.vendor) || "—"}
                     </div>
                   </div>
 
                   <div className="rounded-lg border p-3">
                     <div className="text-xs text-muted-foreground">Segment</div>
                     <div className="mt-1 font-medium">
-                      {vendorSegmentLabel(viewOrder.vendor?.vendorSegment)}
+                      {vendorSegmentLabel(inferVendorSegment(viewOrder.vendor))}
                     </div>
                   </div>
 
                   <div className="rounded-lg border p-3">
-                    <div className="text-xs text-muted-foreground">Payout</div>
-                    <div className="mt-1 font-medium">
-                      {payoutBadge(viewOrder.vendor?.payoutStatus)}
+                    <div className="text-xs text-muted-foreground">Vendor Status</div>
+                    <div className="mt-1 font-medium capitalize">
+                      {viewOrder.vendor?.status || "—"}
                     </div>
                   </div>
 
                   <div className="rounded-lg border p-3">
                     <div className="text-xs text-muted-foreground">Total</div>
                     <div className="mt-1 font-semibold">
-                      {formatCurrency(getOrderTotal(viewOrder))}
+                      {formatCurrency(selectedTotal)}
                     </div>
                   </div>
                 </div>
 
-                {/* Items */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div className="rounded-lg border p-4">
+                    <div className="text-sm font-semibold">Vendor Details</div>
+
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <span className="text-muted-foreground">Company: </span>
+                        {viewOrder.vendor?.companyName || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Legal Name: </span>
+                        {viewOrder.vendor?.legalName || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Email: </span>
+                        {viewOrder.vendor?.email || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Mobile: </span>
+                        {viewOrder.vendor?.mobile || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Telephone: </span>
+                        {viewOrder.vendor?.telephone || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Company Type: </span>
+                        {viewOrder.vendor?.companyType || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Country: </span>
+                        {viewOrder.vendor?.country || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">City: </span>
+                        {viewOrder.vendor?.city || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Business Nature: </span>
+                        {viewOrder.vendor?.businessNature || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Established: </span>
+                        {viewOrder.vendor?.estYear || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Relation: </span>
+                        {viewOrder.vendor?.relation || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Employees: </span>
+                        {viewOrder.vendor?.employees || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">PAN: </span>
+                        {viewOrder.vendor?.pan || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">GST: </span>
+                        {viewOrder.vendor?.gst || "—"}
+                      </div>
+                      <div className="sm:col-span-2">
+                        <span className="text-muted-foreground">Export Countries: </span>
+                        {viewOrder.vendor?.exportCountries || "—"}
+                      </div>
+                      <div className="sm:col-span-2">
+                        <span className="text-muted-foreground">Items: </span>
+                        {viewOrder.vendor?.items || "—"}
+                      </div>
+                      <div className="sm:col-span-2">
+                        <span className="text-muted-foreground">Description: </span>
+                        {viewOrder.vendor?.description || "—"}
+                      </div>
+                      <div className="sm:col-span-2">
+                        <span className="text-muted-foreground">Legal Disputes: </span>
+                        {viewOrder.vendor?.legalDisputes || "—"}
+                      </div>
+
+                      {viewOrder.vendor?.documentUrl ? (
+                        <div className="sm:col-span-2">
+                          <a
+                            href={viewOrder.vendor.documentUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary underline"
+                          >
+                            View Vendor Document
+                          </a>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border p-4">
+                    <div className="text-sm font-semibold">Shipping Address</div>
+
+                    <div className="mt-3 text-sm space-y-1">
+                      <div>
+                        <span className="text-muted-foreground">Name: </span>
+                        {viewOrder.shippingAddress?.fullName || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Phone: </span>
+                        {viewOrder.shippingAddress?.phone || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Address 1: </span>
+                        {viewOrder.shippingAddress?.addressLine1 || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Address 2: </span>
+                        {viewOrder.shippingAddress?.addressLine2 || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">City: </span>
+                        {viewOrder.shippingAddress?.city || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">State: </span>
+                        {viewOrder.shippingAddress?.state || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Pincode: </span>
+                        {viewOrder.shippingAddress?.pincode || "—"}
+                      </div>
+                    </div>
+
+                    <div className="mt-5 border-t pt-4 text-sm space-y-1">
+                      <div className="font-semibold">Pricing</div>
+                      <div>
+                        <span className="text-muted-foreground">Subtotal: </span>
+                        {formatCurrency(viewOrder.pricing?.subtotal)}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">GST: </span>
+                        {formatCurrency(viewOrder.pricing?.gstAmount)}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">GST Rate: </span>
+                        {Number(viewOrder.pricing?.gstRate || 0) * 100}%
+                      </div>
+                      <div className="font-semibold">
+                        <span className="text-muted-foreground font-normal">Total: </span>
+                        {formatCurrency(viewOrder.pricing?.total)}
+                      </div>
+                    </div>
+
+                    {viewOrder.note ? (
+                      <div className="mt-5 border-t pt-4 text-sm">
+                        <div className="font-semibold">Vendor Note</div>
+                        <div className="mt-2 text-muted-foreground whitespace-pre-wrap">
+                          {viewOrder.note}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
                 <div className="rounded-lg border p-4">
                   <div className="flex items-center justify-between">
                     <div className="text-sm font-semibold">Items</div>
@@ -577,12 +809,10 @@ export default function VendorOrderHistory() {
 
                   <div className="mt-3 space-y-3">
                     {viewOrder.items?.map((it, idx) => {
-                      const name = it.name || it.productSnapshot?.name || "Item";
+                      const name = it.name || "Item";
                       const qty = Number(it.quantity || 0);
-                      const price = Number(
-                        it.finalPrice ?? it.price ?? it.productSnapshot?.price ?? 0
-                      );
-                      const image = it.image || it.productSnapshot?.image || "";
+                      const unitPrice = Number(it.unitPrice || 0);
+                      const lineTotal = Number(it.lineTotal ?? unitPrice * qty);
 
                       return (
                         <div
@@ -590,30 +820,17 @@ export default function VendorOrderHistory() {
                           className="flex flex-col sm:flex-row gap-3 border rounded-lg p-3"
                         >
                           <div className="h-20 w-20 shrink-0 overflow-hidden rounded-md border bg-muted">
-                            {image ? (
-                              <img src={image} alt={name} className="h-full w-full object-cover" />
+                            {it.image ? (
+                              <img
+                                src={it.image}
+                                alt={name}
+                                className="h-full w-full object-cover"
+                              />
                             ) : null}
                           </div>
 
                           <div className="flex-1">
                             <div className="font-medium">{name}</div>
-
-                            {it.productSnapshot ? (
-                              <div className="text-xs text-muted-foreground">
-                                Category: {it.productSnapshot?.category || "—"}
-                                {it.productSnapshot?.colors?.length
-                                  ? ` • Colors: ${it.productSnapshot.colors.join(", ")}`
-                                  : ""}
-                                {it.productSnapshot?.inStock === false ? " • Out of stock" : ""}
-                              </div>
-                            ) : null}
-
-                            {typeof it.discountPercent === "number" ? (
-                              <div className="text-xs text-muted-foreground mt-1">
-                                Discount: {it.discountPercent}% (
-                                {formatCurrency(it.discountAmount || 0)})
-                              </div>
-                            ) : null}
 
                             <div className="mt-2 flex flex-wrap gap-4 text-sm">
                               <div>
@@ -621,17 +838,26 @@ export default function VendorOrderHistory() {
                                 {qty}
                               </div>
                               <div>
-                                <span className="text-muted-foreground">Price: </span>
-                                {formatCurrency(price)}
+                                <span className="text-muted-foreground">Unit Price: </span>
+                                {formatCurrency(unitPrice)}
                               </div>
                               <div className="font-semibold">
                                 <span className="text-muted-foreground font-normal">Line: </span>
-                                {formatCurrency(price * qty)}
+                                {formatCurrency(lineTotal)}
                               </div>
                             </div>
 
-                            <div className="mt-2 text-xs text-muted-foreground font-mono">
-                              productId: {it.productId}
+                            <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                              <div>
+                                Product ID: <span className="font-mono">{it.productId}</span>
+                              </div>
+                              <div>SKU: {it.sku || "—"}</div>
+                              <div>Tier: {it.tier || "—"}</div>
+                              <div>Category: {it.category || "—"}</div>
+                              <div>Subcategory: {it.subcategory || "—"}</div>
+                              <div>Material: {it.material || "—"}</div>
+                              <div>Color: {it.color || "—"}</div>
+                              <div>Size: {it.size || "—"}</div>
                             </div>
                           </div>
                         </div>
@@ -640,7 +866,6 @@ export default function VendorOrderHistory() {
                   </div>
                 </div>
 
-                {/* Footer buttons */}
                 <div className="flex flex-col sm:flex-row justify-end gap-2 pb-2 pt-1">
                   <Button
                     variant="outline"
@@ -693,6 +918,17 @@ export default function VendorOrderHistory() {
                     >
                       <ShieldCheck className="h-4 w-4 mr-2" />
                       Confirm
+                    </Button>
+                  ) : null}
+
+                  {nextActionButtons(viewOrder.status).includes("processing") ? (
+                    <Button
+                      variant="outline"
+                      disabled={actionId === viewOrder._id}
+                      onClick={() => updateStatus(viewOrder, "processing")}
+                    >
+                      <Package className="h-4 w-4 mr-2" />
+                      Mark Processing
                     </Button>
                   ) : null}
 

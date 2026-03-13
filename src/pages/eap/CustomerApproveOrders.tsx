@@ -23,14 +23,10 @@ const ALL_API = `${API_ROOT}/orders/all`;
 
 type Order = {
   _id: string;
-
   userId?: string;
   customerId?: string;
-
-  // IMPORTANT: in ALL endpoint you MUST have website set to identify origin
   website?: "affordable" | "midrange" | "luxury" | string;
   websiteLabel?: "Affordable" | "Mid Range" | "Luxury";
-
   items: Array<{
     productId: string;
     name?: string;
@@ -41,7 +37,6 @@ type Order = {
     discountAmount?: number;
     finalPrice?: number;
     _id?: string;
-
     productSnapshot?: {
       name?: string;
       price?: number;
@@ -51,8 +46,6 @@ type Order = {
       colors?: string[];
     };
   }>;
-
-  // midrange
   addressSnapshot?: {
     fullName?: string;
     phone?: string;
@@ -63,15 +56,12 @@ type Order = {
     state?: string;
     pincode?: string;
   };
-
   totals?: {
     subtotal?: number;
     shipping?: number;
     tax?: number;
     total?: number;
   };
-
-  // luxury/affordable
   pricing?: {
     subtotal?: number;
     shipping?: number;
@@ -80,46 +70,35 @@ type Order = {
     discount?: number;
     total?: number;
     currency?: string;
-
-    // luxury (if you store)
     shippingBase?: number;
-    coupon?: {
-      code?: string;
-    };
+    coupon?: { code?: string };
   };
-
   payment?: {
-    method?: string; // cod / razorpay / upi / card ...
-    status?: string; // unpaid / paid / pending / failed
+    method?: string;
+    status?: string;
     transactionId?: string;
-
-    gateway?: string; // razorpay
+    gateway?: string;
     razorpayOrderId?: string;
     razorpayPaymentId?: string;
     razorpaySignature?: string;
-
     meta?: {
       upiId?: string;
       bank?: string;
       cardLast4?: string;
       last4?: string;
     };
-
     upiId?: string;
     cardLast4?: string;
     last4?: string;
   };
-
   status: string;
   createdAt?: string;
   updatedAt?: string;
-
   userDetails?: {
     _id: string;
     name?: string;
     email?: string;
   };
-
   addressDetails?: {
     _id?: string;
     fullName?: string;
@@ -133,7 +112,6 @@ type Order = {
     landmark?: string;
     isDefault?: boolean;
   } | null;
-
   rejectReason?: string;
 };
 
@@ -145,6 +123,14 @@ type OrdersResponse =
       message?: string;
       pagination?: any;
     };
+
+// Response shape for single order endpoints
+type OrderResponse = {
+  success?: boolean;
+  message?: string;
+  order?: Order;
+  data?: Order;
+};
 
 async function api<T>(url: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem("token");
@@ -234,13 +220,11 @@ function orderOwnerId(o: Order) {
 }
 
 function segmentFromOrder(o: Order): Exclude<Segment, "all"> {
-  // prefer `website` if present
   const w = String(o.website || "").toLowerCase();
   if (w.includes("aff")) return "affordable";
   if (w.includes("mid")) return "midrange";
   if (w.includes("lux")) return "luxury";
 
-  // fallback to websiteLabel (when segment filter used)
   if (o.websiteLabel === "Affordable") return "affordable";
   if (o.websiteLabel === "Mid Range") return "midrange";
   return "luxury";
@@ -284,8 +268,6 @@ export function CustomerApproveOrders() {
 
       if (segment === "all") {
         const res = await api<OrdersResponse>(`${ALL_API}${qs}`);
-
-        // ✅ ensure websiteLabel exists even if backend doesn’t send it
         const list = normalizeResponse(res)
           .map((o) => ({
             ...o,
@@ -338,19 +320,13 @@ export function CustomerApproveOrders() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segment, status]);
 
-  // ✅ When All endpoint is “thin”, fetch full order details from the correct segment API
   const fetchFullOrder = async (o: Order) => {
     const seg = segmentFromOrder(o);
     const base = SEGMENT_API[seg];
 
-    // You need these backend routes:
-    // GET /api/admin/{segment}/orders/:id   -> returns full order with populated userDetails/addressDetails
-    // If you don't have it, add it OR return full details in /orders/all
-    const full = await api<{ success?: boolean; order?: Order; data?: Order }>(`${base}/${o._id}`, {
-      method: "GET",
-    });
+    const full = await api<OrderResponse>(`${base}/${o._id}`, { method: "GET" });
+    const order = full.order || full.data || full;
 
-    const order = (full as any)?.order || (full as any)?.data || (full as any);
     return {
       ...o,
       ...order,
@@ -363,7 +339,6 @@ export function CustomerApproveOrders() {
     setOpen(true);
     setSelected(order);
 
-    // ✅ in ALL mode, hydrate full details
     if (segment === "all") {
       setLoadingSelected(true);
       try {
@@ -387,15 +362,14 @@ export function CustomerApproveOrders() {
       const seg = segmentFromOrder(order);
       const base = SEGMENT_API[seg];
 
-      const res = await api<{ message?: string; order?: Order; data?: Order }>(`${base}/${order._id}/approve`, {
+      const res = await api<OrderResponse>(`${base}/${order._id}/approve`, {
         method: "PATCH",
       });
 
-      const updated = (res as any)?.order || (res as any)?.data || null;
+      const updated = res.order || res.data || null;
 
       toast({ title: "Order Approved", description: res?.message || "Approved" });
 
-      // ✅ remove from list if we’re viewing "placed" filter
       if (status === "placed") {
         setOrders((prev) => prev.filter((o) => o._id !== order._id));
         if (selected?._id === order._id) {
@@ -428,6 +402,9 @@ export function CustomerApproveOrders() {
   };
 
   const handleReject = async (order: Order) => {
+    // Optional: ask for confirmation before showing prompt
+    if (!window.confirm("Are you sure you want to reject this order?")) return;
+
     setActionId(order._id);
     try {
       const reason = window.prompt("Reason (optional):") || "";
@@ -435,12 +412,12 @@ export function CustomerApproveOrders() {
       const seg = segmentFromOrder(order);
       const base = SEGMENT_API[seg];
 
-      const res = await api<{ message?: string; order?: Order; data?: Order }>(`${base}/${order._id}/reject`, {
+      const res = await api<OrderResponse>(`${base}/${order._id}/reject`, {
         method: "PATCH",
         body: JSON.stringify({ reason }),
       });
 
-      const updated = (res as any)?.order || (res as any)?.data || null;
+      const updated = res.order || res.data || null;
 
       toast({
         title: "Order Rejected",
@@ -680,7 +657,6 @@ export function CustomerApproveOrders() {
                 </div>
               </div>
 
-              {/* ✅ Payment details */}
               <div className="rounded-lg border p-3">
                 <div className="text-sm font-semibold">Payment</div>
                 <div className="mt-2 text-sm space-y-1">

@@ -15,6 +15,8 @@ import {
   Mail,
   Download,
   CreditCard,
+  Wrench,
+  MapPinned,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
@@ -22,23 +24,22 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-/** ✅ Segment types (now includes all) */
 type Segment = "all" | "affordable" | "midrange" | "luxury";
 
-/** ✅ Status flow (keep lowercase in backend enum) */
 type Status =
   | "placed"
   | "approved"
   | "confirmed"
   | "shipped"
+  | "intransit"
   | "delivered"
+  | "assemble"
   | "cancelled"
   | "rejected"
   | "pending_payment"
   | "processing"
   | "returned";
 
-/** ✅ API routes */
 const API_ROOT = "https://api.jsgallor.com/api/admin";
 const API_ALL = `${API_ROOT}/orders/all`;
 
@@ -48,21 +49,17 @@ const SEGMENT_API: Record<Exclude<Segment, "all">, string> = {
   luxury: `${API_ROOT}/luxury/orders`,
 };
 
-/** ---------------- Types ---------------- */
-
 type OrderItem = {
   productId: string;
   quantity: number;
-
-  // midrange style
   name?: string;
   image?: string;
+  color?: string;
   price?: number;
+  lineTotal?: number;
   discountPercent?: number;
   discountAmount?: number;
   finalPrice?: number;
-
-  // affordable/luxury style snapshot
   productSnapshot?: {
     name?: string;
     price?: number;
@@ -78,12 +75,9 @@ type OrderPayment = {
   method?: string;
   status?: string;
   transactionId?: string;
-
-  // legacy
+  gateway?: string;
   upiId?: string;
   cardLast4?: string;
-
-  // modern
   meta?: {
     upiId?: string;
     bank?: string;
@@ -92,8 +86,6 @@ type OrderPayment = {
     bankRef?: string;
     [k: string]: any;
   };
-
-  // Razorpay (if you store)
   razorpayOrderId?: string;
   razorpayPaymentId?: string;
   razorpaySignature?: string;
@@ -102,14 +94,13 @@ type OrderPayment = {
 type OrderPricing = {
   subtotal?: number;
   discount?: number;
-  shippingCost?: number; // affordable style
-  shipping?: number; // luxury style
+  shippingCost?: number;
+  shipping?: number;
   shippingBase?: number;
   shippingDiscount?: number;
   tax?: number;
   total?: number;
   currency?: string;
-
   coupon?: {
     couponId?: string;
     code?: string;
@@ -122,24 +113,35 @@ type OrderPricing = {
 type OrderTotals = {
   subtotal?: number;
   shipping?: number;
+  shippingBase?: number;
+  shippingDiscount?: number;
+  discount?: number;
   tax?: number;
   total?: number;
 };
 
 type OrderAddressSnapshot = {
   fullName?: string;
+  firstName?: string;
+  lastName?: string;
+  name?: string;
   phone?: string;
+  email?: string;
   line1?: string;
   line2?: string;
   landmark?: string;
   city?: string;
   state?: string;
   pincode?: string;
+  country?: string;
 };
 
 type OrderAddressDetails = {
   _id?: string;
   fullName?: string;
+  firstName?: string;
+  lastName?: string;
+  name?: string;
   phone?: string;
   email?: string;
   addressLine1?: string;
@@ -153,43 +155,63 @@ type OrderAddressDetails = {
   label?: string;
 } | null;
 
+type ShippingAddress = {
+  label?: string;
+  firstName?: string;
+  lastName?: string;
+  fullName?: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  country?: string;
+  landmark?: string;
+} | null;
+
 type Order = {
   _id: string;
-
-  // owner id differs per segment
-  userId?: string; // affordable often
-  customerId?: string; // luxury often
-
+  userId?: string;
+  customerId?: string;
   addressId?: string;
   website?: string;
-
-  // ✅ used by UI for "all" rows
   websiteLabel?: "Affordable" | "Mid Range" | "Luxury";
-
   addressSnapshot?: OrderAddressSnapshot;
   addressDetails?: OrderAddressDetails;
-
+  shippingAddress?: ShippingAddress;
   items: OrderItem[];
-
   pricing?: OrderPricing;
   totals?: OrderTotals;
-
+  coupon?: {
+    couponId?: string | null;
+    code?: string;
+    type?: string;
+    value?: number;
+    maxDiscount?: number;
+  } | null;
   payment?: OrderPayment;
-
   status: Status | string;
   createdAt?: string;
   updatedAt?: string;
-
   userDetails?: {
     _id: string;
     name?: string;
+    firstName?: string;
+    lastName?: string;
     email?: string;
     phone?: string;
   } | null;
-
-  // optional luxury embedded
-  shippingAddress?: any;
   orderNumber?: string;
+  notes?: string;
+  statusHistory?: Array<{
+    status?: string;
+    changedAt?: string;
+    note?: string;
+    changedBy?: string | null;
+  }>;
 };
 
 type OrdersResponse =
@@ -214,6 +236,11 @@ function normalizeResponse(res: OrdersResponse): Order[] {
   return Array.isArray(res) ? res : res?.data || [];
 }
 
+const nonEmpty = (v?: any) => {
+  const s = String(v ?? "").trim();
+  return s || "";
+};
+
 const formatCurrency = (amount = 0) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -235,20 +262,33 @@ const formatDate = (iso?: string) =>
 
 const orderShortId = (id: string) => `#${id.slice(-6).toUpperCase()}`;
 
-const safeName = (u?: any) =>
-  (u?.fullName || u?.name || `${u?.firstName || ""} ${u?.lastName || ""}`.trim() || "").trim();
+const getFullName = (obj?: any) =>
+  nonEmpty(obj?.fullName) ||
+  [nonEmpty(obj?.firstName), nonEmpty(obj?.lastName)].filter(Boolean).join(" ").trim() ||
+  nonEmpty(obj?.name) ||
+  "";
 
 const getCustomerLabel = (order: Order) =>
-  order.userDetails?.name ||
-  order.addressSnapshot?.fullName ||
-  order.addressDetails?.fullName ||
-  order.userDetails?.email ||
+  nonEmpty(order.userDetails?.name) ||
+  nonEmpty(getFullName(order.userDetails)) ||
+  nonEmpty(getFullName(order.addressSnapshot)) ||
+  nonEmpty(getFullName(order.addressDetails)) ||
+  nonEmpty(getFullName(order.shippingAddress)) ||
+  nonEmpty(order.userDetails?.email) ||
+  nonEmpty(order.addressDetails?.email) ||
+  nonEmpty(order.shippingAddress?.email) ||
   "Customer";
 
 const getCustomerSub = (order: Order) =>
   [
-    order.userDetails?.email || order.addressDetails?.email || "",
-    order.userDetails?.phone || order.addressSnapshot?.phone || order.addressDetails?.phone || "",
+    nonEmpty(order.userDetails?.email) ||
+      nonEmpty(order.addressDetails?.email) ||
+      nonEmpty(order.addressSnapshot?.email) ||
+      nonEmpty(order.shippingAddress?.email),
+    nonEmpty(order.userDetails?.phone) ||
+      nonEmpty(order.addressSnapshot?.phone) ||
+      nonEmpty(order.addressDetails?.phone) ||
+      nonEmpty(order.shippingAddress?.phone),
   ]
     .filter(Boolean)
     .join(" • ");
@@ -259,73 +299,110 @@ const buildAddressLine = (o: Order) => {
   if (o.addressSnapshot) {
     const a = o.addressSnapshot;
     return [
-      a.fullName ? `Name: ${a.fullName}` : null,
-      a.phone ? `Phone: ${a.phone}` : null,
-      a.line1,
-      a.line2,
-      a.landmark ? `Landmark: ${a.landmark}` : null,
-      `${a.city || ""}${a.city ? "," : ""} ${a.state || ""}`.trim(),
-      a.pincode ? `PIN: ${a.pincode}` : null,
+      nonEmpty(getFullName(a)) ? `Name: ${getFullName(a)}` : null,
+      nonEmpty(a.phone) ? `Phone: ${a.phone}` : null,
+      nonEmpty(a.line1),
+      nonEmpty(a.line2),
+      nonEmpty(a.landmark) ? `Landmark: ${a.landmark}` : null,
+      [nonEmpty(a.city), nonEmpty(a.state)].filter(Boolean).join(", "),
+      nonEmpty(a.pincode) ? `PIN: ${a.pincode}` : null,
+      nonEmpty(a.country) ? `Country: ${a.country}` : null,
     ]
       .filter(Boolean)
       .join(", ");
   }
 
-  const a = o.addressDetails;
-  if (!a) return "—";
-  return [
-    a.fullName ? `Name: ${a.fullName}` : null,
-    a.phone ? `Phone: ${a.phone}` : null,
-    a.addressLine1,
-    a.addressLine2,
-    a.landmark ? `Landmark: ${a.landmark}` : null,
-    `${a.city || ""}${a.city ? "," : ""} ${a.state || ""}`.trim(),
-    a.pincode ? `PIN: ${a.pincode}` : null,
-    a.country ? `Country: ${a.country}` : null,
-  ]
-    .filter(Boolean)
-    .join(", ");
+  if (o.addressDetails) {
+    const a = o.addressDetails;
+    return [
+      nonEmpty(getFullName(a)) ? `Name: ${getFullName(a)}` : null,
+      nonEmpty(a.phone) ? `Phone: ${a.phone}` : null,
+      nonEmpty(a.addressLine1),
+      nonEmpty(a.addressLine2),
+      nonEmpty(a.landmark) ? `Landmark: ${a.landmark}` : null,
+      [nonEmpty(a.city), nonEmpty(a.state)].filter(Boolean).join(", "),
+      nonEmpty(a.pincode) ? `PIN: ${a.pincode}` : null,
+      nonEmpty(a.country) ? `Country: ${a.country}` : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+  }
+
+  if (o.shippingAddress) {
+    const a = o.shippingAddress;
+    return [
+      nonEmpty(getFullName(a)) ? `Name: ${getFullName(a)}` : null,
+      nonEmpty(a.phone) ? `Phone: ${a.phone}` : null,
+      nonEmpty(a.addressLine1),
+      nonEmpty(a.addressLine2),
+      nonEmpty(a.landmark) ? `Landmark: ${a.landmark}` : null,
+      [nonEmpty(a.city), nonEmpty(a.state)].filter(Boolean).join(", "),
+      nonEmpty(a.pincode) ? `PIN: ${a.pincode}` : null,
+      nonEmpty(a.country) ? `Country: ${a.country}` : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+  }
+
+  return "—";
 };
 
 const orderItemsText = (o: Order) =>
-  (o.items || [])
+  (Array.isArray(o.items) ? o.items : [])
     .map((i) => {
       const name = i.name || i.productSnapshot?.name || "Item";
       return `${name} × ${i.quantity}`;
     })
     .join(", ") || "—";
 
-/** Normalize payment label + show razorpay if exists */
 const paymentLabel = (o: Order) => {
   const p = o.payment || {};
-  const method = (p.method || "").toString().trim();
-  const status = (p.status || "").toString().trim();
+  const method = nonEmpty(p.method);
+  const status = nonEmpty(p.status);
   if (!method && !status) return "—";
   return `${method || "—"}${status ? ` / ${status}` : ""}`.toUpperCase();
 };
 
-/** Calculate totals across different models */
 const getSubtotal = (o: Order) =>
   Number(
     o.totals?.subtotal ??
       o.pricing?.subtotal ??
-      (o.items || []).reduce((s, it) => {
-        const price = Number(it.finalPrice ?? it.productSnapshot?.price ?? it.price ?? 0);
-        return s + price * Number(it.quantity || 0);
+      (Array.isArray(o.items) ? o.items : []).reduce((s, it) => {
+        const price = Number(
+          it.finalPrice ?? it.productSnapshot?.price ?? it.price ?? it.lineTotal ?? 0
+        );
+        const qty = Number(it.quantity || 0);
+        if (it.finalPrice != null || it.price != null || it.productSnapshot?.price != null) {
+          return s + price * (it.finalPrice != null ? qty : 1);
+        }
+        return s + price;
       }, 0)
   );
 
-const getDiscount = (o: Order) => Number(o.pricing?.discount ?? 0);
+const getDiscount = (o: Order) =>
+  Number(o.totals?.discount ?? o.pricing?.discount ?? o.coupon?.value ?? 0);
 
 const getShipping = (o: Order) =>
-  Number(o.totals?.shipping ?? o.pricing?.shippingCost ?? o.pricing?.shipping ?? 0);
+  Number(
+    o.totals?.shipping ??
+      o.pricing?.shippingCost ??
+      o.pricing?.shipping ??
+      o.totals?.shippingBase ??
+      o.pricing?.shippingBase ??
+      0
+  );
 
 const getTax = (o: Order) => Number(o.totals?.tax ?? o.pricing?.tax ?? 0);
 
-const getTotal = (o: Order) => Number(o.totals?.total ?? o.pricing?.total ?? 0);
+const getTotal = (o: Order) =>
+  Number(
+    o.totals?.total ??
+      o.pricing?.total ??
+      Math.max(0, getSubtotal(o) - getDiscount(o) + getShipping(o) + getTax(o))
+  );
 
 const isTerminalStatus = (s?: string) =>
-  s === "delivered" || s === "cancelled" || s === "rejected" || s === "returned";
+  s === "assemble" || s === "cancelled" || s === "rejected" || s === "returned";
 
 const nextActionButtons = (s?: string) => {
   switch (s) {
@@ -336,21 +413,21 @@ const nextActionButtons = (s?: string) => {
     case "confirmed":
       return ["ship", "cancel"] as const;
     case "shipped":
+      return ["intransit", "cancel"] as const;
+    case "intransit":
       return ["deliver"] as const;
+    case "delivered":
+      return ["assemble"] as const;
     default:
       return [] as const;
   }
 };
 
-/** ---------------- Component ---------------- */
-
 export default function CustomerOrderHistory() {
   const [segment, setSegment] = useState<Segment>("all");
   const [statusFilter, setStatusFilter] = useState<Status | "all">("all");
-
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
-
   const [viewOrder, setViewOrder] = useState<Order | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
 
@@ -359,26 +436,30 @@ export default function CustomerOrderHistory() {
     return token ? { Authorization: `Bearer ${token}` } : {};
   };
 
-  /** For segment=all: route actions based on websiteLabel/website */
   const resolveBaseForOrder = (o: Order) => {
-    const label = (o.websiteLabel || o.website || "").toString().toLowerCase();
+    const label = nonEmpty(o.websiteLabel || o.website).toLowerCase();
     if (label.includes("afford")) return SEGMENT_API.affordable;
     if (label.includes("mid")) return SEGMENT_API.midrange;
     return SEGMENT_API.luxury;
   };
 
-  /** Ensure websiteLabel exists */
   const ensureWebsiteLabel = (o: Order): Order => {
-    const w = (o.website || "").toString().toLowerCase();
+    const w = nonEmpty(o.website).toLowerCase();
     const lbl =
-      (o.websiteLabel as any) ||
+      o.websiteLabel ||
       (w.includes("afford")
-        ? ("Affordable" as const)
+        ? "Affordable"
         : w.includes("mid")
-        ? ("Mid Range" as const)
-        : ("Luxury" as const));
+        ? "Mid Range"
+        : w.includes("lux")
+        ? "Luxury"
+        : o.customerId
+        ? "Luxury"
+        : o.userId && o.addressSnapshot
+        ? "Mid Range"
+        : "Luxury");
 
-    return { ...o, websiteLabel: lbl };
+    return { ...o, websiteLabel: lbl as "Affordable" | "Mid Range" | "Luxury" };
   };
 
   const fetchOrders = async () => {
@@ -398,7 +479,6 @@ export default function CustomerOrderHistory() {
 
       const list = normalizeResponse(data as OrdersResponse).map(ensureWebsiteLabel);
 
-      // sort latest first
       list.sort((a, b) => {
         const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
         const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
@@ -420,10 +500,8 @@ export default function CustomerOrderHistory() {
 
   useEffect(() => {
     fetchOrders();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segment, statusFilter]);
 
-  /** Generic status update (if your backend supports PATCH /:id/status) */
   const updateStatus = async (order: Order, status: Status) => {
     setActionId(order._id);
     try {
@@ -441,7 +519,6 @@ export default function CustomerOrderHistory() {
       toast({ title: "Updated", description: data?.message || "Order updated" });
 
       const updated: Order = ensureWebsiteLabel((data?.order || data) as Order);
-
       setOrders((prev) => prev.map((o) => (o._id === order._id ? updated : o)));
       setViewOrder((prev) => (prev?._id === order._id ? updated : prev));
     } catch (err: any) {
@@ -455,7 +532,6 @@ export default function CustomerOrderHistory() {
     }
   };
 
-  /** Approve */
   const approveOrder = async (order: Order) => {
     setActionId(order._id);
     try {
@@ -485,12 +561,10 @@ export default function CustomerOrderHistory() {
     }
   };
 
-  /** Reject */
   const rejectOrder = async (order: Order) => {
     setActionId(order._id);
     try {
       const reason = window.prompt("Reason (optional):") || "";
-
       const base = segment === "all" ? resolveBaseForOrder(order) : SEGMENT_API[segment];
 
       const res = await fetch(`${base}/${order._id}/reject`, {
@@ -527,17 +601,15 @@ export default function CustomerOrderHistory() {
     await updateStatus(order, "cancelled");
   };
 
-  /**
-   * ✅ Send Invoice (Email)
-   * Backend endpoint you should create:
-   * POST {base}/{orderId}/invoice/email
-   * Body: { email?: string }
-   */
   const sendInvoiceEmail = async (order: Order) => {
     setActionId(order._id);
     try {
       const base = segment === "all" ? resolveBaseForOrder(order) : SEGMENT_API[segment];
-      const toEmail = order.userDetails?.email || order.addressDetails?.email || "";
+      const toEmail =
+        nonEmpty(order.userDetails?.email) ||
+        nonEmpty(order.addressDetails?.email) ||
+        nonEmpty(order.shippingAddress?.email) ||
+        "";
 
       const res = await fetch(`${base}/${order._id}/invoice/email`, {
         method: "POST",
@@ -563,11 +635,6 @@ export default function CustomerOrderHistory() {
     }
   };
 
-  /**
-   * ✅ Download Invoice PDF (optional)
-   * Backend endpoint:
-   * GET {base}/{orderId}/invoice/pdf  -> returns PDF
-   */
   const downloadInvoice = async (order: Order) => {
     setActionId(order._id);
     try {
@@ -608,7 +675,6 @@ export default function CustomerOrderHistory() {
     }
   };
 
-  /** Columns */
   const columns = useMemo(
     () => [
       {
@@ -645,9 +711,7 @@ export default function CustomerOrderHistory() {
       {
         key: "items",
         header: "Items",
-        render: (order: Order) => (
-          <span className="text-sm">{orderItemsText(order)}</span>
-        ),
+        render: (order: Order) => <span className="text-sm">{orderItemsText(order)}</span>,
       },
       {
         key: "total",
@@ -693,12 +757,11 @@ export default function CustomerOrderHistory() {
 
   const tableData = useMemo(() => orders, [orders]);
 
-  /** Invoice helpers */
   const invoiceItemRow = (it: OrderItem) => {
     const name = it.name || it.productSnapshot?.name || "Item";
     const qty = Number(it.quantity || 0);
     const unit = Number(it.finalPrice ?? it.productSnapshot?.price ?? it.price ?? 0);
-    const line = unit * qty;
+    const line = Number(it.lineTotal ?? unit * qty);
     const img = it.image || it.productSnapshot?.image || "";
     return { name, qty, unit, line, img, productId: it.productId };
   };
@@ -715,24 +778,27 @@ export default function CustomerOrderHistory() {
   const paymentDetails = (o: Order) => {
     const p = o.payment || {};
     const meta = p.meta || {};
-    const cardLast4 = p.cardLast4 || meta.cardLast4 || meta.last4 || "";
-    const upiId = p.upiId || meta.upiId || "";
-    const bank = meta.bank || "";
+    const cardLast4 = nonEmpty(p.cardLast4) || nonEmpty(meta.cardLast4) || nonEmpty(meta.last4);
+    const upiId = nonEmpty(p.upiId) || nonEmpty(meta.upiId);
+    const bank = nonEmpty(meta.bank);
     return {
-      method: (p.method || "—").toUpperCase(),
-      status: (p.status || "—").toUpperCase(),
-      transactionId: p.transactionId || "",
+      method: nonEmpty(p.method).toUpperCase() || "—",
+      status: nonEmpty(p.status).toUpperCase() || "—",
+      transactionId: nonEmpty(p.transactionId),
       cardLast4,
       upiId,
       bank,
-      razorpayOrderId: (p as any).razorpayOrderId || "",
-      razorpayPaymentId: (p as any).razorpayPaymentId || "",
+      razorpayOrderId: nonEmpty((p as any).razorpayOrderId),
+      razorpayPaymentId: nonEmpty((p as any).razorpayPaymentId),
     };
   };
 
   return (
-    <AdminLayout panelType="eap" title="Order History" subtitle="All websites • full details • invoice actions">
-      {/* Filters */}
+    <AdminLayout
+      panelType="eap"
+      title="Order History"
+      subtitle="All websites • full details • invoice actions"
+    >
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
         <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
           <div className="flex items-center gap-2">
@@ -764,7 +830,9 @@ export default function CustomerOrderHistory() {
                 <SelectItem value="confirmed">Confirmed</SelectItem>
                 <SelectItem value="processing">Processing</SelectItem>
                 <SelectItem value="shipped">Shipped</SelectItem>
+                <SelectItem value="intransit">In Transit</SelectItem>
                 <SelectItem value="delivered">Delivered</SelectItem>
+                <SelectItem value="assemble">Assemble</SelectItem>
                 <SelectItem value="cancelled">Cancelled</SelectItem>
                 <SelectItem value="rejected">Rejected</SelectItem>
                 <SelectItem value="returned">Returned</SelectItem>
@@ -793,7 +861,6 @@ export default function CustomerOrderHistory() {
         actions={actions}
       />
 
-      {/* VIEW + INVOICE MODAL */}
       <Dialog open={!!viewOrder} onOpenChange={() => setViewOrder(null)}>
         <DialogContent className="w-[95vw] sm:w-[92vw] lg:w-[1000px] max-w-[95vw] h-[88vh] p-0 overflow-hidden">
           <DialogHeader className="px-4 sm:px-6 py-4 border-b">
@@ -827,7 +894,6 @@ export default function CustomerOrderHistory() {
               <div className="text-sm text-muted-foreground">No order selected.</div>
             ) : (
               <>
-                {/* Top summary */}
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                   <div className="rounded-lg border p-3">
                     <div className="text-xs text-muted-foreground">Order</div>
@@ -850,10 +916,12 @@ export default function CustomerOrderHistory() {
                   <div className="rounded-lg border p-3">
                     <div className="text-xs text-muted-foreground">Total</div>
                     <div className="mt-1 font-semibold">{formatCurrency(getTotal(viewOrder))}</div>
-                    {viewOrder.pricing?.coupon?.code ? (
+                    {(viewOrder.pricing?.coupon?.code || viewOrder.coupon?.code) ? (
                       <div className="text-xs mt-1">
                         <span className="text-muted-foreground">Coupon: </span>
-                        <span className="font-mono">{viewOrder.pricing.coupon.code}</span>
+                        <span className="font-mono">
+                          {viewOrder.pricing?.coupon?.code || viewOrder.coupon?.code}
+                        </span>
                       </div>
                     ) : null}
                   </div>
@@ -864,7 +932,6 @@ export default function CustomerOrderHistory() {
                   </div>
                 </div>
 
-                {/* Address + Payment */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                   <div className="rounded-lg border p-4 space-y-2">
                     <div className="text-sm font-semibold">Delivery Address</div>
@@ -890,6 +957,7 @@ export default function CustomerOrderHistory() {
                             <span className="text-muted-foreground">Method</span>
                             <span className="font-medium">{p.method}</span>
                           </div>
+
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Status</span>
                             <span className="font-medium">{p.status}</span>
@@ -923,7 +991,7 @@ export default function CustomerOrderHistory() {
                             </div>
                           ) : null}
 
-                          {(p.razorpayOrderId || p.razorpayPaymentId) ? (
+                          {p.razorpayOrderId || p.razorpayPaymentId ? (
                             <div className="pt-2 text-xs text-muted-foreground space-y-1">
                               {p.razorpayOrderId ? (
                                 <div>
@@ -943,18 +1011,22 @@ export default function CustomerOrderHistory() {
                   </div>
                 </div>
 
-                {/* Items */}
                 <div className="rounded-lg border p-4">
                   <div className="flex items-center justify-between">
                     <div className="text-sm font-semibold">Items</div>
-                    <div className="text-xs text-muted-foreground">{viewOrder.items?.length || 0} item(s)</div>
+                    <div className="text-xs text-muted-foreground">
+                      {Array.isArray(viewOrder.items) ? viewOrder.items.length : 0} item(s)
+                    </div>
                   </div>
 
                   <div className="mt-3 space-y-3">
-                    {viewOrder.items?.map((it, idx) => {
+                    {(Array.isArray(viewOrder.items) ? viewOrder.items : []).map((it, idx) => {
                       const row = invoiceItemRow(it);
                       return (
-                        <div key={`${it.productId}-${idx}`} className="flex flex-col sm:flex-row gap-3 border rounded-lg p-3">
+                        <div
+                          key={`${it.productId}-${idx}`}
+                          className="flex flex-col sm:flex-row gap-3 border rounded-lg p-3"
+                        >
                           <div className="h-20 w-20 shrink-0 overflow-hidden rounded-md border bg-muted">
                             {row.img ? (
                               <img src={row.img} alt={row.name} className="h-full w-full object-cover" />
@@ -964,9 +1036,13 @@ export default function CustomerOrderHistory() {
                           <div className="flex-1">
                             <div className="font-medium">{row.name}</div>
 
-                            {it.productSnapshot?.category ? (
+                            {(it.productSnapshot?.category || it.color) ? (
                               <div className="text-xs text-muted-foreground">
-                                Category: {it.productSnapshot.category}
+                                {it.productSnapshot?.category
+                                  ? `Category: ${it.productSnapshot.category}`
+                                  : null}
+                                {it.productSnapshot?.category && it.color ? " • " : ""}
+                                {it.color ? `Color: ${it.color}` : null}
                                 {it.productSnapshot?.colors?.length
                                   ? ` • Colors: ${it.productSnapshot.colors.join(", ")}`
                                   : ""}
@@ -994,7 +1070,9 @@ export default function CustomerOrderHistory() {
                               </div>
                             </div>
 
-                            <div className="mt-2 text-xs text-muted-foreground font-mono">productId: {row.productId}</div>
+                            <div className="mt-2 text-xs text-muted-foreground font-mono">
+                              productId: {row.productId}
+                            </div>
                           </div>
                         </div>
                       );
@@ -1002,7 +1080,6 @@ export default function CustomerOrderHistory() {
                   </div>
                 </div>
 
-                {/* Invoice (Professional block) */}
                 <div className="rounded-lg border p-4">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
@@ -1036,7 +1113,6 @@ export default function CustomerOrderHistory() {
                   </div>
 
                   <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    {/* Left invoice meta */}
                     <div className="rounded-md border bg-secondary/10 p-4 space-y-2">
                       <div className="text-xs text-muted-foreground">Billed To</div>
                       <div className="font-medium">{getCustomerLabel(viewOrder)}</div>
@@ -1048,7 +1124,9 @@ export default function CustomerOrderHistory() {
                       <div className="pt-2 grid grid-cols-2 gap-2 text-sm">
                         <div>
                           <div className="text-xs text-muted-foreground">Invoice No.</div>
-                          <div className="font-mono text-xs">{viewOrder.orderNumber || viewOrder._id.slice(-10)}</div>
+                          <div className="font-mono text-xs">
+                            {viewOrder.orderNumber || viewOrder._id.slice(-10)}
+                          </div>
                         </div>
                         <div>
                           <div className="text-xs text-muted-foreground">Invoice Date</div>
@@ -1057,7 +1135,6 @@ export default function CustomerOrderHistory() {
                       </div>
                     </div>
 
-                    {/* Right totals */}
                     <div className="rounded-md border bg-secondary/10 p-4">
                       {(() => {
                         const t = invoiceTotals(viewOrder);
@@ -1071,7 +1148,9 @@ export default function CustomerOrderHistory() {
                             {t.discount > 0 ? (
                               <div className="flex justify-between">
                                 <span className="text-muted-foreground">Discount</span>
-                                <span className="font-medium text-emerald-600">- {formatCurrency(t.discount)}</span>
+                                <span className="font-medium text-emerald-600">
+                                  - {formatCurrency(t.discount)}
+                                </span>
                               </div>
                             ) : null}
 
@@ -1092,10 +1171,12 @@ export default function CustomerOrderHistory() {
                               <span className="font-bold">{formatCurrency(t.total)}</span>
                             </div>
 
-                            {viewOrder.pricing?.coupon?.code ? (
+                            {(viewOrder.pricing?.coupon?.code || viewOrder.coupon?.code) ? (
                               <div className="pt-2 text-xs text-muted-foreground">
                                 Coupon Applied:{" "}
-                                <span className="font-mono">{viewOrder.pricing.coupon.code}</span>
+                                <span className="font-mono">
+                                  {viewOrder.pricing?.coupon?.code || viewOrder.coupon?.code}
+                                </span>
                               </div>
                             ) : null}
                           </div>
@@ -1105,9 +1186,12 @@ export default function CustomerOrderHistory() {
                   </div>
                 </div>
 
-                {/* Footer actions */}
                 <div className="flex flex-col sm:flex-row justify-end gap-2 pb-3 pt-1">
-                  <Button variant="outline" onClick={() => setViewOrder(null)} disabled={actionId === viewOrder._id}>
+                  <Button
+                    variant="outline"
+                    onClick={() => setViewOrder(null)}
+                    disabled={actionId === viewOrder._id}
+                  >
                     Close
                   </Button>
 
@@ -1168,6 +1252,17 @@ export default function CustomerOrderHistory() {
                     </Button>
                   ) : null}
 
+                  {nextActionButtons(viewOrder.status).includes("intransit") ? (
+                    <Button
+                      variant="outline"
+                      disabled={actionId === viewOrder._id}
+                      onClick={() => updateStatus(viewOrder, "intransit")}
+                    >
+                      <MapPinned className="h-4 w-4 mr-2" />
+                      Mark In Transit
+                    </Button>
+                  ) : null}
+
                   {nextActionButtons(viewOrder.status).includes("deliver") ? (
                     <Button
                       variant="outline"
@@ -1176,6 +1271,17 @@ export default function CustomerOrderHistory() {
                     >
                       <Package className="h-4 w-4 mr-2" />
                       Mark Delivered
+                    </Button>
+                  ) : null}
+
+                  {nextActionButtons(viewOrder.status).includes("assemble") ? (
+                    <Button
+                      variant="outline"
+                      disabled={actionId === viewOrder._id}
+                      onClick={() => updateStatus(viewOrder, "assemble")}
+                    >
+                      <Wrench className="h-4 w-4 mr-2" />
+                      Mark Assembled
                     </Button>
                   ) : null}
                 </div>

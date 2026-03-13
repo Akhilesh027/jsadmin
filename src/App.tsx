@@ -53,6 +53,7 @@ import VendorReports from "./pages/pap/vendor/VendorReports";
 import EcommerceReports from "./pages/eap/EcommerceReports";
 import LegalPagesManager from "./pages/eap/LegalPagesManager";
 import AdminEstimates from "./pages/cap/Estimates";
+import ShippingCostManagement from "./pages/cap/ShippingCostManagement";
 
 const queryClient = new QueryClient();
 
@@ -478,6 +479,8 @@ const App = () => (
           <Route path="/eap/reports" element={<EcommerceReports />} />
 <Route path="/eap/legal-pages" element={<LegalPagesManager />} />
 <Route path="/admin/estimates" element={<AdminEstimates />} />
+<Route path="/admin/shipping-costs" element={<ShippingCostManagement />} />
+
           <Route
             path="/eap/orders/track"
             element={

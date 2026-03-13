@@ -1,13 +1,28 @@
 // src/pages/pap/vendor/VendorOrderTracking.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { AdminLayout } from "@/components/layout/AdminLayout";
-import { Package, Truck, CheckCircle, Clock, XCircle, Loader2 } from "lucide-react";
+import {
+  Package,
+  Truck,
+  CheckCircle,
+  Clock,
+  XCircle,
+  Loader2,
+  MapPin,
+  Building2,
+  FileText,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type Segment = "all" | "affordable" | "midrange" | "luxury";
 
@@ -15,11 +30,11 @@ const API_BASE =
   (import.meta as any).env?.VITE_BASE_URL?.replace(/\/$/, "") || "https://api.jsgallor.com";
 const VENDOR_ORDERS_API = `${API_BASE}/api/admin/vendor-orders`;
 
-/** Timeline steps */
 const statusSteps = [
   { key: "placed", label: "Placed", icon: Clock },
   { key: "approved", label: "Approved", icon: CheckCircle },
   { key: "confirmed", label: "Confirmed", icon: Package },
+  { key: "processing", label: "Processing", icon: Package },
   { key: "shipped", label: "Shipped", icon: Truck },
   { key: "delivered", label: "Delivered", icon: CheckCircle },
 ] as const;
@@ -27,6 +42,7 @@ const statusSteps = [
 type StepKey = (typeof statusSteps)[number]["key"];
 
 type OrderStatus =
+  | "pending"
   | "placed"
   | "approved"
   | "confirmed"
@@ -35,13 +51,35 @@ type OrderStatus =
   | "delivered"
   | "cancelled"
   | "rejected"
-  | "returned"
+  | "reviewing"
   | string;
 
 type VendorDetails = {
-  vendorId: string;
-  vendorName: string;
-  vendorSegment: Exclude<Segment, "all">;
+  _id?: string;
+  companyName?: string;
+  legalName?: string;
+  companyType?: string;
+  telephone?: string;
+  mobile?: string;
+  email?: string;
+  country?: string;
+  city?: string;
+  businessNature?: string;
+  estYear?: number | null;
+  relation?: string;
+  employees?: string;
+  pan?: string;
+  gst?: string;
+  items?: string;
+  legalDisputes?: string;
+  exportCountries?: string;
+  description?: string;
+  documentUrl?: string;
+  status?: "pending" | "approved" | "rejected";
+
+  vendorId?: string;
+  vendorName?: string;
+  vendorSegment?: Exclude<Segment, "all">;
   payoutStatus?: "pending" | "paid" | "hold";
 };
 
@@ -50,35 +88,40 @@ type OrderItem = {
   quantity: number;
   name?: string;
   image?: string;
-  price?: number;
-  discountPercent?: number;
-  discountAmount?: number;
-  finalPrice?: number;
-  productSnapshot?: {
-    name?: string;
-    price?: number;
-    image?: string;
-    category?: string;
-    inStock?: boolean;
-    colors?: string[];
-  };
+  sku?: string;
+  tier?: string;
+  category?: string;
+  subcategory?: string;
+  material?: string;
+  color?: string;
+  size?: string;
+  unitPrice?: number;
+  lineTotal?: number;
+};
+
+type ShippingAddress = {
+  fullName?: string;
+  phone?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
 };
 
 type Order = {
   _id: string;
-  vendor: VendorDetails;
+  orderNumber?: string;
+  vendor: VendorDetails | null;
   items: OrderItem[];
+  shippingAddress?: ShippingAddress;
   pricing?: { subtotal?: number; gstRate?: number; gstAmount?: number; total?: number };
-  totals?: { total?: number };
-  payment?: { method?: string; status?: string; transactionId?: string };
+  note?: string;
+  meta?: { forwardedToAdmin?: boolean };
   status: OrderStatus;
   createdAt?: string;
+  updatedAt?: string;
 };
-
-type ApiResponse =
-  | { success: boolean; orders: Order[] }
-  | { orders: Order[] }
-  | Order[];
 
 const safeJson = async (res: Response) => {
   try {
@@ -105,18 +148,18 @@ const formatCurrency = (amount = 0) =>
   }).format(Number(amount || 0));
 
 const formatDate = (iso?: string) =>
-  iso
-    ? new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" })
-    : "—";
+  iso ? new Date(iso).toLocaleString("en-IN") : "—";
 
-const getOrderNumber = (order: Order) => `#${order._id.slice(-6).toUpperCase()}`;
+const getOrderNumber = (order: Order) =>
+  order.orderNumber || `#${order._id.slice(-6).toUpperCase()}`;
 
-const paymentLabel = (o: Order) => {
-  const method = (o.payment?.method || "").toString().trim();
-  const status = (o.payment?.status || "").toString().trim();
-  if (!method && !status) return "—";
-  return `${method || "—"}${status ? ` / ${status}` : ""}`.toUpperCase();
-};
+const vendorNameLabel = (vendor?: VendorDetails | null) =>
+  vendor?.companyName || vendor?.legalName || vendor?.vendorName || "—";
+
+const vendorIdLabel = (vendor?: VendorDetails | null) =>
+  String(vendor?.vendorId || vendor?._id || "")
+    .slice(-8)
+    .toUpperCase();
 
 const vendorSegmentLabel = (seg?: string) => {
   const s = norm(seg);
@@ -135,27 +178,30 @@ const payoutLabel = (s?: VendorDetails["payoutStatus"]) => {
 
 const orderItemsText = (o: Order) =>
   (o.items || [])
-    .map((i) => `${i.name || i.productSnapshot?.name || "Item"} × ${i.quantity}`)
+    .map((i) => `${i.name || "Item"} × ${i.quantity}`)
     .join(", ") || "—";
 
-const getOrderTotal = (o: Order) => Number(o.totals?.total ?? o.pricing?.total ?? 0);
+const getOrderTotal = (o: Order) => Number(o.pricing?.total ?? 0);
 
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 
-/** Normalize backend status -> timeline step */
-const normalizeToTimeline = (status: OrderStatus): StepKey | "rejected" | "cancelled" => {
+const normalizeToTimeline = (
+  status: OrderStatus
+): StepKey | "rejected" | "cancelled" => {
   const s = norm(status);
 
   if (s === "rejected") return "rejected";
   if (s === "cancelled") return "cancelled";
 
-  if (s === "returned") return "delivered";
-  if (s === "processing") return "confirmed";
+  if (s === "pending") return "placed";
+  if (s === "reviewing") return "approved";
 
   if (s === "delivered") return "delivered";
   if (s === "shipped") return "shipped";
+  if (s === "processing") return "processing";
   if (s === "confirmed") return "confirmed";
   if (s === "approved") return "approved";
+
   return "placed";
 };
 
@@ -174,6 +220,7 @@ const statusBadge = (status: OrderStatus) => {
       </span>
     );
   }
+
   if (s === "cancelled") {
     return (
       <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-red-900/20 text-red-300 border border-red-900/40">
@@ -203,24 +250,27 @@ export default function VendorOrderTracking() {
       localStorage.getItem("auth_token") ||
       localStorage.getItem("token") ||
       "";
-    return token ? { Authorization: `Bearer ${token}` } : {};
+    return {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
   };
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
 
       const qs = new URLSearchParams();
       if (segment !== "all") qs.set("segment", segment);
-
-      // we send status to backend but also apply client filter (case-safe)
       if (statusFilter !== "all") qs.set("status", String(statusFilter));
 
       const url = `${VENDOR_ORDERS_API}?${qs.toString()}`;
-
       const res = await fetch(url, { headers: authHeaders() });
       const data = await safeJson(res);
-      if (!res.ok) throw new Error(data?.message || "Failed to fetch vendor orders");
+
+      if (!res.ok) {
+        throw new Error(data?.message || "Failed to fetch vendor orders");
+      }
 
       setOrders(normalizeOrders(data));
     } catch (err: any) {
@@ -233,27 +283,29 @@ export default function VendorOrderTracking() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [segment, statusFilter]);
 
   useEffect(() => {
     fetchOrders();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segment, statusFilter]);
+  }, [fetchOrders]);
 
   const visibleOrders = useMemo(() => {
     let list = [...orders];
 
-    // active/all
     if (showMode === "active") {
-      list = list.filter((o) => !["delivered", "cancelled", "rejected", "returned"].includes(norm(o.status)));
+      list = list.filter(
+        (o) => !["delivered", "cancelled", "rejected"].includes(norm(o.status))
+      );
     }
 
-    // client-side status filter (case-safe)
     if (statusFilter !== "all") {
       list = list.filter((o) => norm(o.status) === norm(statusFilter));
     }
 
-    // latest first
+    if (segment !== "all") {
+      list = list.filter((o) => norm(o.vendor?.vendorSegment) === segment);
+    }
+
     list.sort((a, b) => {
       const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
       const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
@@ -261,12 +313,14 @@ export default function VendorOrderTracking() {
     });
 
     return list;
-  }, [orders, showMode, statusFilter]);
+  }, [orders, showMode, statusFilter, segment]);
 
   const statusOptions = useMemo(() => {
     return [
       { value: "all", label: "All" },
+      { value: "pending", label: "Pending" },
       { value: "placed", label: "Placed" },
+      { value: "reviewing", label: "Reviewing" },
       { value: "approved", label: "Approved" },
       { value: "confirmed", label: "Confirmed" },
       { value: "processing", label: "Processing" },
@@ -274,17 +328,18 @@ export default function VendorOrderTracking() {
       { value: "delivered", label: "Delivered" },
       { value: "cancelled", label: "Cancelled" },
       { value: "rejected", label: "Rejected" },
-      { value: "returned", label: "Returned" },
     ] as const;
   }, []);
 
   return (
-    <AdminLayout panelType="pap-vendor" title="Track Vendor Orders" subtitle="Track vendor order progress">
+    <AdminLayout
+      panelType="pap-vendor"
+      title="Track Vendor Orders"
+      subtitle="Track vendor order progress"
+    >
       <div className="space-y-6">
-        {/* Filters row */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-            {/* Segment */}
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Vendor Segment:</span>
               <Select value={segment} onValueChange={(v) => setSegment(v as Segment)}>
@@ -300,7 +355,6 @@ export default function VendorOrderTracking() {
               </Select>
             </div>
 
-            {/* Show Mode */}
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">View:</span>
               <Select value={showMode} onValueChange={(v) => setShowMode(v as "active" | "all")}>
@@ -314,7 +368,6 @@ export default function VendorOrderTracking() {
               </Select>
             </div>
 
-            {/* Status Filter */}
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Status:</span>
               <Select value={statusFilter as any} onValueChange={(v) => setStatusFilter(v as any)}>
@@ -336,7 +389,6 @@ export default function VendorOrderTracking() {
             </div>
           </div>
 
-          {/* Refresh */}
           <div className="flex justify-end">
             <Button variant="outline" onClick={fetchOrders} disabled={loading}>
               {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
@@ -345,7 +397,6 @@ export default function VendorOrderTracking() {
           </div>
         </div>
 
-        {/* Loading */}
         {loading ? (
           <div className="flex items-center justify-center py-14 text-muted-foreground gap-2">
             <Loader2 className="h-5 w-5 animate-spin" />
@@ -353,26 +404,32 @@ export default function VendorOrderTracking() {
           </div>
         ) : null}
 
-        {/* Cards */}
         {!loading &&
           visibleOrders.map((order) => {
             const normalized = normalizeToTimeline(order.status);
 
             const timelineStep: StepKey =
-              normalized === "rejected" || normalized === "cancelled" ? "placed" : normalized;
+              normalized === "rejected" || normalized === "cancelled"
+                ? "placed"
+                : normalized;
 
             const currentIndex = getStepIndexSafe(timelineStep);
-            const progress = clamp((currentIndex / (statusSteps.length - 1)) * 100, 0, 100);
+            const progress = clamp(
+              (currentIndex / (statusSteps.length - 1)) * 100,
+              0,
+              100
+            );
 
             const items = order.items || [];
 
             return (
               <div key={order._id} className="bg-card rounded-xl border border-border p-6">
-                {/* Header */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
                   <div>
                     <div className="flex items-center gap-3 flex-wrap">
-                      <h3 className="font-semibold text-lg text-foreground">{getOrderNumber(order)}</h3>
+                      <h3 className="font-semibold text-lg text-foreground">
+                        {getOrderNumber(order)}
+                      </h3>
 
                       <span className="text-xs px-2 py-1 rounded-md border">
                         {vendorSegmentLabel(order.vendor?.vendorSegment)}
@@ -382,21 +439,31 @@ export default function VendorOrderTracking() {
                         Payout: {payoutLabel(order.vendor?.payoutStatus)}
                       </span>
 
+                      <span className="text-xs px-2 py-1 rounded-md border capitalize">
+                        Vendor: {order.vendor?.status || "—"}
+                      </span>
+
                       {statusBadge(order.status)}
 
-                      <Badge variant="secondary" className="text-xs">
-                        {paymentLabel(order)}
-                      </Badge>
+                      {order.meta?.forwardedToAdmin ? (
+                        <Badge variant="secondary" className="text-xs">
+                          Forwarded
+                        </Badge>
+                      ) : null}
                     </div>
 
                     <p className="text-sm text-muted-foreground">
-                      Vendor: <span className="text-foreground font-medium">{order.vendor?.vendorName || "—"}</span>
+                      Vendor:{" "}
+                      <span className="text-foreground font-medium">
+                        {vendorNameLabel(order.vendor)}
+                      </span>
                       {" • "}
                       {formatDate(order.createdAt)}
                     </p>
 
                     <p className="text-xs text-muted-foreground mt-1">
-                      Vendor ID: <span className="font-mono">{String(order.vendor?.vendorId || "").slice(-8).toUpperCase()}</span>
+                      Vendor ID:{" "}
+                      <span className="font-mono">{vendorIdLabel(order.vendor) || "—"}</span>
                     </p>
                   </div>
 
@@ -406,7 +473,6 @@ export default function VendorOrderTracking() {
                   </div>
                 </div>
 
-                {/* Cancel/Reject message */}
                 {norm(order.status) === "rejected" ? (
                   <div className="mb-4 rounded-lg border border-red-800 bg-red-900/20 px-4 py-3 text-sm text-red-300">
                     This order is <span className="font-semibold">REJECTED</span>.
@@ -419,20 +485,21 @@ export default function VendorOrderTracking() {
                   </div>
                 ) : null}
 
-                {/* Timeline */}
                 <div className="relative">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     {statusSteps.map((step, index) => {
                       const isCompleted = index <= currentIndex;
                       const isCurrent = index === currentIndex;
                       const Icon = step.icon;
 
                       return (
-                        <div key={step.key} className="flex flex-col items-center flex-1">
+                        <div key={step.key} className="flex flex-col items-center flex-1 min-w-0">
                           <div
                             className={cn(
                               "h-10 w-10 rounded-full flex items-center justify-center transition-all duration-300",
-                              isCompleted ? "bg-success text-success-foreground" : "bg-muted text-muted-foreground",
+                              isCompleted
+                                ? "bg-success text-success-foreground"
+                                : "bg-muted text-muted-foreground",
                               isCurrent && "ring-4 ring-success/30"
                             )}
                           >
@@ -441,8 +508,10 @@ export default function VendorOrderTracking() {
 
                           <span
                             className={cn(
-                              "text-xs mt-2 text-center hidden sm:block",
-                              isCompleted ? "text-foreground font-medium" : "text-muted-foreground"
+                              "text-[11px] mt-2 text-center",
+                              isCompleted
+                                ? "text-foreground font-medium"
+                                : "text-muted-foreground"
                             )}
                           >
                             {step.label}
@@ -452,22 +521,189 @@ export default function VendorOrderTracking() {
                     })}
                   </div>
 
-                  {/* Progress line */}
                   <div className="absolute top-5 left-0 right-0 h-0.5 bg-muted -z-10">
-                    <div className="h-full bg-success transition-all duration-500" style={{ width: `${progress}%` }} />
+                    <div
+                      className="h-full bg-success transition-all duration-500"
+                      style={{ width: `${progress}%` }}
+                    />
                   </div>
                 </div>
 
-                {/* Items */}
+                <div className="mt-6 grid grid-cols-1 xl:grid-cols-3 gap-4">
+                  <div className="xl:col-span-1 rounded-lg border p-4">
+                    <div className="flex items-center gap-2 text-sm font-semibold">
+                      <Building2 className="h-4 w-4" />
+                      Vendor Details
+                    </div>
+
+                    <div className="mt-3 space-y-1 text-sm">
+                      <div>
+                        <span className="text-muted-foreground">Company: </span>
+                        {order.vendor?.companyName || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Legal Name: </span>
+                        {order.vendor?.legalName || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Email: </span>
+                        {order.vendor?.email || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Mobile: </span>
+                        {order.vendor?.mobile || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">City: </span>
+                        {order.vendor?.city || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Country: </span>
+                        {order.vendor?.country || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">GST: </span>
+                        {order.vendor?.gst || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">PAN: </span>
+                        {order.vendor?.pan || "—"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="xl:col-span-1 rounded-lg border p-4">
+                    <div className="flex items-center gap-2 text-sm font-semibold">
+                      <MapPin className="h-4 w-4" />
+                      Shipping Address
+                    </div>
+
+                    <div className="mt-3 space-y-1 text-sm">
+                      <div>
+                        <span className="text-muted-foreground">Name: </span>
+                        {order.shippingAddress?.fullName || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Phone: </span>
+                        {order.shippingAddress?.phone || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Address: </span>
+                        {order.shippingAddress?.addressLine1 || "—"}
+                        {order.shippingAddress?.addressLine2
+                          ? `, ${order.shippingAddress.addressLine2}`
+                          : ""}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">City: </span>
+                        {order.shippingAddress?.city || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">State: </span>
+                        {order.shippingAddress?.state || "—"}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Pincode: </span>
+                        {order.shippingAddress?.pincode || "—"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="xl:col-span-1 rounded-lg border p-4">
+                    <div className="flex items-center gap-2 text-sm font-semibold">
+                      <FileText className="h-4 w-4" />
+                      Pricing
+                    </div>
+
+                    <div className="mt-3 space-y-1 text-sm">
+                      <div>
+                        <span className="text-muted-foreground">Subtotal: </span>
+                        {formatCurrency(order.pricing?.subtotal)}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">GST: </span>
+                        {formatCurrency(order.pricing?.gstAmount)}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">GST Rate: </span>
+                        {Number(order.pricing?.gstRate || 0) * 100}%
+                      </div>
+                      <div className="font-semibold">
+                        <span className="text-muted-foreground font-normal">Total: </span>
+                        {formatCurrency(order.pricing?.total)}
+                      </div>
+                    </div>
+
+                    {order.note ? (
+                      <div className="mt-4 border-t pt-3 text-sm">
+                        <div className="font-semibold">Vendor Note</div>
+                        <div className="mt-1 text-muted-foreground whitespace-pre-wrap">
+                          {order.note}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
                 <div className="mt-6 pt-4 border-t border-border">
                   <p className="text-sm text-muted-foreground mb-2">Items:</p>
 
                   {items.length ? (
-                    <div className="flex flex-wrap gap-2">
+                    <div className="space-y-3">
                       {items.map((item, idx) => (
-                        <span key={`${item.productId}-${idx}`} className="px-3 py-1 bg-muted rounded-full text-sm">
-                          {item.name || item.productSnapshot?.name || "Item"} × {item.quantity}
-                        </span>
+                        <div
+                          key={`${item.productId}-${idx}`}
+                          className="rounded-lg border p-3 flex flex-col sm:flex-row gap-3"
+                        >
+                          <div className="h-16 w-16 shrink-0 overflow-hidden rounded-md border bg-muted">
+                            {item.image ? (
+                              <img
+                                src={item.image}
+                                alt={item.name || "Item"}
+                                className="h-full w-full object-cover"
+                              />
+                            ) : null}
+                          </div>
+
+                          <div className="flex-1">
+                            <div className="font-medium">{item.name || "Item"}</div>
+
+                            <div className="mt-2 flex flex-wrap gap-3 text-sm">
+                              <div>
+                                <span className="text-muted-foreground">Qty: </span>
+                                {item.quantity}
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Unit Price: </span>
+                                {formatCurrency(item.unitPrice)}
+                              </div>
+                              <div className="font-semibold">
+                                <span className="text-muted-foreground font-normal">
+                                  Line Total:{" "}
+                                </span>
+                                {formatCurrency(
+                                  Number(
+                                    item.lineTotal ??
+                                      Number(item.unitPrice || 0) * Number(item.quantity || 0)
+                                  )
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                              <div>
+                                Product ID: <span className="font-mono">{item.productId}</span>
+                              </div>
+                              <div>SKU: {item.sku || "—"}</div>
+                              <div>Tier: {item.tier || "—"}</div>
+                              <div>Category: {item.category || "—"}</div>
+                              <div>Subcategory: {item.subcategory || "—"}</div>
+                              <div>Material: {item.material || "—"}</div>
+                              <div>Color: {item.color || "—"}</div>
+                              <div>Size: {item.size || "—"}</div>
+                            </div>
+                          </div>
+                        </div>
                       ))}
                     </div>
                   ) : (
@@ -478,12 +714,13 @@ export default function VendorOrderTracking() {
             );
           })}
 
-        {/* Empty */}
         {!loading && visibleOrders.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
             <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />
             <p>No vendor orders found</p>
-            <p className="text-xs mt-1">Try switching <b>View</b> to <b>All orders</b> or change filters.</p>
+            <p className="text-xs mt-1">
+              Try switching <b>View</b> to <b>All orders</b> or change filters.
+            </p>
           </div>
         ) : null}
       </div>

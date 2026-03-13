@@ -63,6 +63,12 @@ const coreAdminNav: NavItem[] = [
     { title: "Coupons", href: "/cap/coupons", icon: Ticket }, // ✅ added
     { title: "Categories", href: "/cap/categories", icon: Layers },
     { title: "Banners", href: "/cap/banners", icon: ImageIcon },
+    {
+  title: "Shipping Costs",
+  href: "/admin/shipping-costs",
+  icon: Truck,
+},
+
     { title: "Estimates", href: "/admin/estimates", icon: FileText },
     { title: "Reports", href: "/cap/reports", icon: FileText },
 ];

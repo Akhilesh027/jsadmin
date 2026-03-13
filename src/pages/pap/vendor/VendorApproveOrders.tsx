@@ -1,5 +1,5 @@
 // src/pages/pap/vendor/VendorApproveOrders.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import { DataTable } from "@/components/ui/data-table";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -24,63 +24,84 @@ import {
 
 type Segment = "all" | "affordable" | "midrange" | "luxury";
 
-/** ✅ Vendor-specific shape */
 type VendorDetails = {
-  vendorId: string; // vendor _id
-  vendorName: string;
-  vendorSegment: Exclude<Segment, "all">;
+  _id?: string;
+  companyName?: string;
+  legalName?: string;
+  companyType?: string;
+  telephone?: string;
+  mobile?: string;
+  email?: string;
+  country?: string;
+  city?: string;
+  businessNature?: string;
+  estYear?: number | null;
+  relation?: string;
+  employees?: string;
+  pan?: string;
+  gst?: string;
+  items?: string;
+  legalDisputes?: string;
+  exportCountries?: string;
+  description?: string;
+  documentUrl?: string;
+  status?: "pending" | "approved" | "rejected";
+
+  vendorId?: string;
+  vendorName?: string;
+  vendorSegment?: Exclude<Segment, "all">;
   payoutStatus?: "pending" | "paid" | "hold";
 };
 
 type OrderItem = {
   productId: string;
   name?: string;
+  sku?: string;
   image?: string;
+  tier?: string;
+  category?: string;
+  subcategory?: string;
+  material?: string;
+  color?: string;
+  size?: string;
   quantity: number;
-  price?: number;
-  discountPercent?: number;
-  discountAmount?: number;
-  finalPrice?: number;
+  unitPrice?: number;
+  lineTotal?: number;
+};
 
-  productSnapshot?: {
-    name?: string;
-    price?: number;
-    image?: string;
-    category?: string;
-    inStock?: boolean;
-    colors?: string[];
-  };
+type ShippingAddress = {
+  fullName?: string;
+  phone?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
 };
 
 type Order = {
   _id: string;
+  orderNumber?: string;
+  status: string;
+  note?: string;
 
-  website?: string;
-  websiteLabel?: "Affordable" | "Mid Range" | "Luxury";
-
-  vendor: VendorDetails;
-
+  vendor: VendorDetails | null;
   items: OrderItem[];
+  shippingAddress?: ShippingAddress;
 
-  totals?: { total?: number };
-  pricing?: { total?: number };
-
-  payment?: {
-    method?: string;
-    status?: string;
-    transactionId?: string;
+  pricing?: {
+    subtotal?: number;
+    gstRate?: number;
+    gstAmount?: number;
+    total?: number;
   };
 
-  status: string;
+  meta?: {
+    forwardedToAdmin?: boolean;
+  };
+
   createdAt?: string;
   updatedAt?: string;
-
-  adminDecision?: {
-    action?: "approved" | "rejected";
-    reason?: string;
-    by?: string;
-    at?: string;
-  };
 };
 
 function formatCurrency(amount?: number) {
@@ -97,19 +118,39 @@ function formatDate(iso?: string) {
   return new Date(iso).toLocaleString("en-IN");
 }
 
+function safeStatus(status?: string) {
+  return String(status || "").trim().toLowerCase();
+}
+
+function isPlacedStatus(status?: string) {
+  const s = safeStatus(status);
+  return s === "placed";
+}
+
 function orderTotal(o: Order) {
-  return o.totals?.total ?? o.pricing?.total ?? 0;
+  return Number(o.pricing?.total ?? 0);
 }
 
 function orderItemsText(o: Order) {
-  return (o.items || [])
+  const text = (o.items || [])
     .slice(0, 3)
-    .map((it) => `${it.name || it.productSnapshot?.name || "Item"} × ${it.quantity}`)
-    .join(", ")
-    .concat(o.items?.length > 3 ? ` +${o.items.length - 3} more` : "");
+    .map((it) => `${it.name || "Item"} × ${it.quantity}`)
+    .join(", ");
+
+  return text + ((o.items?.length || 0) > 3 ? ` +${o.items.length - 3} more` : "");
 }
 
-function vendorSegmentLabel(seg: VendorDetails["vendorSegment"]) {
+function inferVendorSegment(vendor?: VendorDetails | null): Exclude<Segment, "all"> {
+  const raw = String(vendor?.vendorSegment || "").toLowerCase();
+
+  if (raw === "affordable" || raw === "midrange" || raw === "luxury") {
+    return raw;
+  }
+
+  return "affordable";
+}
+
+function vendorSegmentLabel(seg: Exclude<Segment, "all">) {
   if (seg === "affordable") return "Affordable";
   if (seg === "midrange") return "Mid Range";
   return "Luxury";
@@ -122,20 +163,20 @@ function payoutBadge(status?: VendorDetails["payoutStatus"]) {
   return "Pending";
 }
 
-/** ✅ change token key if needed */
 function getAdminToken() {
-  // ✅ your app uses Admintoken
-  return localStorage.getItem("Admintoken") || localStorage.getItem("auth_token") || localStorage.getItem("token") || "";
+  return (
+    localStorage.getItem("Admintoken") ||
+    localStorage.getItem("auth_token") ||
+    localStorage.getItem("token") ||
+    ""
+  );
 }
 
-/** ✅ change base URL if needed */
 const API_BASE =
   (import.meta as any).env?.VITE_BASE_URL?.replace(/\/$/, "") || "https://api.jsgallor.com";
 
 export function VendorApproveOrders() {
   const [segment, setSegment] = useState<Segment>("all");
-
-  // ✅ FORCE ONLY PLACED ORDERS (no other statuses on this page)
   const STATUS = "placed";
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -145,7 +186,6 @@ export function VendorApproveOrders() {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<Order | null>(null);
 
-  // ✅ local sort by createdAt desc
   const filteredOrders = useMemo(() => {
     const list = [...orders];
     list.sort((a, b) => {
@@ -156,16 +196,16 @@ export function VendorApproveOrders() {
     return list;
   }, [orders]);
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     setLoading(true);
     try {
       const token = getAdminToken();
 
       const qs = new URLSearchParams();
       qs.set("segment", segment);
-      qs.set("status", STATUS); // ✅ ALWAYS placed
+      qs.set("status", STATUS);
 
-      const res = await fetch(`${API_BASE}/api/admin/vendor-orders`, {
+      const res = await fetch(`${API_BASE}/api/admin/vendor-orders?${qs.toString()}`, {
         headers: {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -178,9 +218,8 @@ export function VendorApproveOrders() {
       }
 
       const data = await res.json();
-
-      // ✅ HARD FILTER (even if backend ignores status)
-      const onlyPlaced = (data.orders || []).filter((o: Order) => o.status === "placed");
+      const incoming = Array.isArray(data?.orders) ? data.orders : [];
+      const onlyPlaced = incoming.filter((o: Order) => isPlacedStatus(o.status));
       setOrders(onlyPlaced);
     } catch (err: any) {
       toast({
@@ -192,13 +231,11 @@ export function VendorApproveOrders() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [segment]);
 
-  // ✅ fetch on first load + whenever segment changes
   useEffect(() => {
     fetchOrders();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segment]);
+  }, [fetchOrders]);
 
   const handleApprove = async (order: Order) => {
     setActionId(order._id);
@@ -218,18 +255,18 @@ export function VendorApproveOrders() {
         throw new Error(msg || "Approve failed");
       }
 
-      const updatedAt = new Date().toISOString();
-
-      // ✅ remove from list (because this page only shows "placed")
       setOrders((prev) => prev.filter((o) => o._id !== order._id));
-
-      // ✅ update selected + close dialog (optional)
       setSelected((prev) =>
-        prev?._id === order._id ? { ...prev, status: "approved", updatedAt } : prev
+        prev?._id === order._id
+          ? { ...prev, status: "approved", updatedAt: new Date().toISOString() }
+          : prev
       );
       setOpen(false);
 
-      toast({ title: "Order Approved", description: "Vendor order approved successfully." });
+      toast({
+        title: "Order Approved",
+        description: "Vendor order approved successfully.",
+      });
     } catch (err: any) {
       toast({
         title: "Approve failed",
@@ -261,13 +298,11 @@ export function VendorApproveOrders() {
         throw new Error(msg || "Reject failed");
       }
 
-      const updatedAt = new Date().toISOString();
-
-      // ✅ remove from list (because this page only shows "placed")
       setOrders((prev) => prev.filter((o) => o._id !== order._id));
-
       setSelected((prev) =>
-        prev?._id === order._id ? { ...prev, status: "rejected", updatedAt } : prev
+        prev?._id === order._id
+          ? { ...prev, status: "rejected", updatedAt: new Date().toISOString() }
+          : prev
       );
       setOpen(false);
 
@@ -296,30 +331,49 @@ export function VendorApproveOrders() {
     {
       key: "vendor",
       header: "Vendor",
-      render: (o: Order) => (
-        <div className="leading-tight">
-          <div className="font-medium">{o.vendor.vendorName}</div>
-          <div className="text-xs text-muted-foreground font-mono">
-            {String(o.vendor.vendorId || "").slice(-8).toUpperCase()}
+      render: (o: Order) => {
+        const vendorName =
+          o.vendor?.companyName ||
+          o.vendor?.legalName ||
+          o.vendor?.vendorName ||
+          "—";
+
+        const vendorId =
+          o.vendor?.vendorId ||
+          o.vendor?._id ||
+          "";
+
+        return (
+          <div className="leading-tight">
+            <div className="font-medium">{vendorName}</div>
+            <div className="text-xs text-muted-foreground font-mono">
+              {String(vendorId).slice(-8).toUpperCase() || "-"}
+            </div>
           </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       key: "segment",
       header: "Segment",
       render: (o: Order) => (
         <span className="text-xs px-2 py-1 rounded-md border">
-          {vendorSegmentLabel(o.vendor.vendorSegment)}
+          {vendorSegmentLabel(inferVendorSegment(o.vendor))}
         </span>
       ),
     },
     {
-      key: "_id",
-      header: "Order ID",
-      render: (o: Order) => <span className="font-mono">{o._id.slice(-8).toUpperCase()}</span>,
+      key: "orderNumber",
+      header: "Order No",
+      render: (o: Order) => (
+        <span className="font-mono">{o.orderNumber || o._id.slice(-8).toUpperCase()}</span>
+      ),
     },
-    { key: "items", header: "Items", render: (o: Order) => orderItemsText(o) || "-" },
+    {
+      key: "items",
+      header: "Items",
+      render: (o: Order) => orderItemsText(o) || "-",
+    },
     {
       key: "total",
       header: "Total",
@@ -328,18 +382,11 @@ export function VendorApproveOrders() {
       ),
     },
     {
-      key: "payment",
-      header: "Payment",
+      key: "vendorStatus",
+      header: "Vendor Status",
       render: (o: Order) => (
-        <span className="uppercase">
-          {o.payment?.method || "-"} / {o.payment?.status || "-"}
-        </span>
+        <span className="text-sm capitalize">{o.vendor?.status || "-"}</span>
       ),
-    },
-    {
-      key: "payout",
-      header: "Payout",
-      render: (o: Order) => <span className="text-sm">{payoutBadge(o.vendor.payoutStatus)}</span>,
     },
     {
       key: "status",
@@ -365,7 +412,6 @@ export function VendorApproveOrders() {
         <Eye className="h-4 w-4" />
       </Button>
 
-      {/* ✅ Only placed orders exist here, keep buttons always visible */}
       <Button
         variant="ghost"
         size="icon"
@@ -392,12 +438,10 @@ export function VendorApproveOrders() {
 
   const selectedItemsTotal =
     selected?.items?.reduce((sum, it) => {
-      const price = Number(it.finalPrice ?? it.productSnapshot?.price ?? it.price ?? 0);
-      return sum + price * Number(it.quantity ?? 0);
+      return sum + Number(it.lineTotal ?? Number(it.unitPrice || 0) * Number(it.quantity || 0));
     }, 0) ?? 0;
 
-  const selectedTotal =
-    selected?.totals?.total ?? selected?.pricing?.total ?? selectedItemsTotal;
+  const selectedTotal = Number(selected?.pricing?.total ?? selectedItemsTotal);
 
   return (
     <AdminLayout
@@ -431,16 +475,16 @@ export function VendorApproveOrders() {
         </Button>
       </div>
 
-      <DataTable data={filteredOrders} columns={columns} searchKey="_id" actions={actions} />
+      <DataTable data={filteredOrders} columns={columns} searchKey="orderNumber" actions={actions} />
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               Vendor Order Details{" "}
               {selected ? (
                 <span className="font-mono text-sm ml-2">
-                  {selected._id.slice(-8).toUpperCase()}
+                  {selected.orderNumber || selected._id.slice(-8).toUpperCase()}
                 </span>
               ) : null}
             </DialogTitle>
@@ -450,20 +494,26 @@ export function VendorApproveOrders() {
             <div className="text-sm text-muted-foreground">No order selected.</div>
           ) : (
             <div className="space-y-5">
-              {/* Top Summary */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 <div className="rounded-lg border p-3">
                   <div className="text-xs text-muted-foreground">Vendor</div>
-                  <div className="mt-1 font-medium">{selected.vendor.vendorName}</div>
+                  <div className="mt-1 font-medium">
+                    {selected.vendor?.companyName ||
+                      selected.vendor?.legalName ||
+                      selected.vendor?.vendorName ||
+                      "—"}
+                  </div>
                   <div className="mt-1 text-xs font-mono text-muted-foreground">
-                    {String(selected.vendor.vendorId || "").slice(-8).toUpperCase()}
+                    {String(selected.vendor?.vendorId || selected.vendor?._id || "")
+                      .slice(-8)
+                      .toUpperCase() || "-"}
                   </div>
                 </div>
 
                 <div className="rounded-lg border p-3">
                   <div className="text-xs text-muted-foreground">Segment</div>
                   <div className="mt-1 font-medium">
-                    {vendorSegmentLabel(selected.vendor.vendorSegment)}
+                    {vendorSegmentLabel(inferVendorSegment(selected.vendor))}
                   </div>
                 </div>
 
@@ -480,40 +530,164 @@ export function VendorApproveOrders() {
                 </div>
               </div>
 
-              {/* Payment + Payout */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="rounded-lg border p-3">
-                  <div className="text-sm font-semibold">Payment</div>
-                  <div className="mt-2 text-sm space-y-1">
+                <div className="rounded-lg border p-4">
+                  <div className="text-sm font-semibold">Vendor Details</div>
+
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                     <div>
-                      <span className="text-muted-foreground">Method: </span>
-                      {selected.payment?.method || "-"}
+                      <span className="text-muted-foreground">Company: </span>
+                      {selected.vendor?.companyName || "-"}
                     </div>
                     <div>
-                      <span className="text-muted-foreground">Status: </span>
-                      {selected.payment?.status || "-"}
+                      <span className="text-muted-foreground">Legal Name: </span>
+                      {selected.vendor?.legalName || "-"}
                     </div>
                     <div>
-                      <span className="text-muted-foreground">Txn: </span>
-                      <span className="font-mono text-xs">
-                        {selected.payment?.transactionId || "-"}
-                      </span>
+                      <span className="text-muted-foreground">Email: </span>
+                      {selected.vendor?.email || "-"}
                     </div>
+                    <div>
+                      <span className="text-muted-foreground">Mobile: </span>
+                      {selected.vendor?.mobile || "-"}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Telephone: </span>
+                      {selected.vendor?.telephone || "-"}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Company Type: </span>
+                      {selected.vendor?.companyType || "-"}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Country: </span>
+                      {selected.vendor?.country || "-"}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">City: </span>
+                      {selected.vendor?.city || "-"}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Business Nature: </span>
+                      {selected.vendor?.businessNature || "-"}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Established: </span>
+                      {selected.vendor?.estYear || "-"}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Relation: </span>
+                      {selected.vendor?.relation || "-"}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Employees: </span>
+                      {selected.vendor?.employees || "-"}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">PAN: </span>
+                      {selected.vendor?.pan || "-"}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">GST: </span>
+                      {selected.vendor?.gst || "-"}
+                    </div>
+                    <div className="sm:col-span-2">
+                      <span className="text-muted-foreground">Export Countries: </span>
+                      {selected.vendor?.exportCountries || "-"}
+                    </div>
+                    <div className="sm:col-span-2">
+                      <span className="text-muted-foreground">Items: </span>
+                      {selected.vendor?.items || "-"}
+                    </div>
+                    <div className="sm:col-span-2">
+                      <span className="text-muted-foreground">Description: </span>
+                      {selected.vendor?.description || "-"}
+                    </div>
+                    <div className="sm:col-span-2">
+                      <span className="text-muted-foreground">Legal Disputes: </span>
+                      {selected.vendor?.legalDisputes || "-"}
+                    </div>
+
+                    {selected.vendor?.documentUrl ? (
+                      <div className="sm:col-span-2">
+                        <a
+                          href={selected.vendor.documentUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-primary underline"
+                        >
+                          View Vendor Document
+                        </a>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
-                <div className="rounded-lg border p-3">
-                  <div className="text-sm font-semibold">Vendor Payout</div>
-                  <div className="mt-2 text-sm space-y-1">
+                <div className="rounded-lg border p-4">
+                  <div className="text-sm font-semibold">Shipping Address</div>
+
+                  <div className="mt-3 text-sm space-y-1">
                     <div>
-                      <span className="text-muted-foreground">Payout Status: </span>
-                      {payoutBadge(selected.vendor.payoutStatus)}
+                      <span className="text-muted-foreground">Name: </span>
+                      {selected.shippingAddress?.fullName || "-"}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Phone: </span>
+                      {selected.shippingAddress?.phone || "-"}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Address 1: </span>
+                      {selected.shippingAddress?.addressLine1 || "-"}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Address 2: </span>
+                      {selected.shippingAddress?.addressLine2 || "-"}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">City: </span>
+                      {selected.shippingAddress?.city || "-"}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">State: </span>
+                      {selected.shippingAddress?.state || "-"}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Pincode: </span>
+                      {selected.shippingAddress?.pincode || "-"}
                     </div>
                   </div>
+
+                  <div className="mt-5 border-t pt-4 text-sm space-y-1">
+                    <div className="font-semibold">Pricing</div>
+                    <div>
+                      <span className="text-muted-foreground">Subtotal: </span>
+                      {formatCurrency(selected.pricing?.subtotal)}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">GST: </span>
+                      {formatCurrency(selected.pricing?.gstAmount)}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">GST Rate: </span>
+                      {Number(selected.pricing?.gstRate || 0) * 100}%
+                    </div>
+                    <div className="font-semibold">
+                      <span className="text-muted-foreground font-normal">Total: </span>
+                      {formatCurrency(selected.pricing?.total)}
+                    </div>
+                  </div>
+
+                  {selected.note ? (
+                    <div className="mt-5 border-t pt-4 text-sm">
+                      <div className="font-semibold">Vendor Note</div>
+                      <div className="mt-2 text-muted-foreground whitespace-pre-wrap">
+                        {selected.note}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
-              {/* Items */}
               <div className="rounded-lg border p-3">
                 <div className="flex items-center justify-between">
                   <div className="text-sm font-semibold">Items</div>
@@ -524,18 +698,17 @@ export function VendorApproveOrders() {
 
                 <div className="mt-3 space-y-3">
                   {selected.items?.map((it, idx) => {
-                    const name = it.name || it.productSnapshot?.name || "Item";
+                    const name = it.name || "Item";
                     const qty = Number(it.quantity ?? 0);
-                    const mrp = Number(it.price ?? it.productSnapshot?.price ?? 0);
-                    const final = Number(it.finalPrice ?? mrp);
-                    const lineTotal = final * qty;
+                    const unitPrice = Number(it.unitPrice ?? 0);
+                    const lineTotal = Number(it.lineTotal ?? unitPrice * qty);
 
                     return (
                       <div key={`${it.productId}-${idx}`} className="flex gap-3 border rounded-lg p-3">
                         <div className="h-16 w-16 shrink-0 overflow-hidden rounded-md border bg-muted">
-                          {it.image || it.productSnapshot?.image ? (
+                          {it.image ? (
                             <img
-                              src={it.image || it.productSnapshot?.image}
+                              src={it.image}
                               alt={name}
                               className="h-full w-full object-cover"
                             />
@@ -552,15 +725,9 @@ export function VendorApproveOrders() {
                             </div>
 
                             <div>
-                              <span className="text-muted-foreground">Final Price: </span>
-                              {formatCurrency(final)}
+                              <span className="text-muted-foreground">Unit Price: </span>
+                              {formatCurrency(unitPrice)}
                             </div>
-
-                            {it.discountPercent ? (
-                              <div className="text-xs text-muted-foreground">
-                                Discount: {it.discountPercent}% ({formatCurrency(it.discountAmount)})
-                              </div>
-                            ) : null}
 
                             <div className="font-semibold">
                               <span className="text-muted-foreground font-normal">Line total: </span>
@@ -568,8 +735,17 @@ export function VendorApproveOrders() {
                             </div>
                           </div>
 
-                          <div className="mt-2 text-xs text-muted-foreground">
-                            Product ID: <span className="font-mono">{it.productId}</span>
+                          <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                            <div>
+                              Product ID: <span className="font-mono">{it.productId}</span>
+                            </div>
+                            <div>SKU: {it.sku || "-"}</div>
+                            <div>Tier: {it.tier || "-"}</div>
+                            <div>Category: {it.category || "-"}</div>
+                            <div>Subcategory: {it.subcategory || "-"}</div>
+                            <div>Material: {it.material || "-"}</div>
+                            <div>Color: {it.color || "-"}</div>
+                            <div>Size: {it.size || "-"}</div>
                           </div>
                         </div>
                       </div>
@@ -578,7 +754,6 @@ export function VendorApproveOrders() {
                 </div>
               </div>
 
-              {/* Footer actions */}
               <div className="flex justify-end gap-2 pt-2">
                 <Button
                   variant="outline"
@@ -588,8 +763,7 @@ export function VendorApproveOrders() {
                   Close
                 </Button>
 
-                {/* still allow actions inside dialog */}
-                {selected.status === "placed" ? (
+                {isPlacedStatus(selected.status) ? (
                   <>
                     <Button
                       className="text-success"

@@ -51,6 +51,12 @@ const SEGMENT_API: Record<Exclude<Segment, "all">, string> = {
 
 type OrderItem = {
   productId: string;
+  variantId?: string | null;                     // ✅ added
+  attributes?: {                                  // ✅ added
+    size?: string | null;
+    color?: string | null;
+    fabric?: string | null;
+  };
   quantity: number;
   name?: string;
   image?: string;
@@ -223,6 +229,19 @@ type OrdersResponse =
     };
 
 /** ---------------- Helpers ---------------- */
+
+// Helper to get color name from hex (for display)
+const getColorName = (hex: string) => {
+  const colors: Record<string, string> = {
+    "#8B7355": "Brown",
+    "#1C1C1C": "Black",
+    "#F5E6D3": "White",
+    "#4A4A4A": "Grey",
+    "#4A6741": "Green",
+    "#2C3E50": "Blue",
+  };
+  return colors[hex.toUpperCase()] || hex;
+};
 
 const safeJson = async (res: Response) => {
   try {
@@ -763,7 +782,8 @@ export default function CustomerOrderHistory() {
     const unit = Number(it.finalPrice ?? it.productSnapshot?.price ?? it.price ?? 0);
     const line = Number(it.lineTotal ?? unit * qty);
     const img = it.image || it.productSnapshot?.image || "";
-    return { name, qty, unit, line, img, productId: it.productId };
+    const attributes = it.attributes || {};
+    return { name, qty, unit, line, img, productId: it.productId, attributes, variantId: it.variantId };
   };
 
   const invoiceTotals = (o: Order) => {
@@ -1022,6 +1042,8 @@ export default function CustomerOrderHistory() {
                   <div className="mt-3 space-y-3">
                     {(Array.isArray(viewOrder.items) ? viewOrder.items : []).map((it, idx) => {
                       const row = invoiceItemRow(it);
+                      const attributes = row.attributes;
+
                       return (
                         <div
                           key={`${it.productId}-${idx}`}
@@ -1036,8 +1058,33 @@ export default function CustomerOrderHistory() {
                           <div className="flex-1">
                             <div className="font-medium">{row.name}</div>
 
+                            {/* ✅ Display variant attributes */}
+                            {(attributes.color || attributes.size || attributes.fabric) && (
+                              <div className="flex flex-wrap gap-2 mt-1 text-xs">
+                                {attributes.color && (
+                                  <span className="inline-flex items-center gap-1 bg-muted px-2 py-0.5 rounded-full">
+                                    <span
+                                      className="w-3 h-3 rounded-full"
+                                      style={{ backgroundColor: attributes.color }}
+                                    />
+                                    {getColorName(attributes.color)}
+                                  </span>
+                                )}
+                                {attributes.size && (
+                                  <span className="bg-muted px-2 py-0.5 rounded-full">
+                                    Size: {attributes.size}
+                                  </span>
+                                )}
+                                {attributes.fabric && (
+                                  <span className="bg-muted px-2 py-0.5 rounded-full capitalize">
+                                    {attributes.fabric}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+
                             {(it.productSnapshot?.category || it.color) ? (
-                              <div className="text-xs text-muted-foreground">
+                              <div className="text-xs text-muted-foreground mt-1">
                                 {it.productSnapshot?.category
                                   ? `Category: ${it.productSnapshot.category}`
                                   : null}
@@ -1070,8 +1117,9 @@ export default function CustomerOrderHistory() {
                               </div>
                             </div>
 
-                            <div className="mt-2 text-xs text-muted-foreground font-mono">
-                              productId: {row.productId}
+                            <div className="mt-2 text-xs text-muted-foreground font-mono space-y-0.5">
+                              <div>productId: {row.productId}</div>
+                              {row.variantId && <div>variantId: {row.variantId}</div>}
                             </div>
                           </div>
                         </div>

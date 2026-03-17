@@ -29,6 +29,12 @@ type Order = {
   websiteLabel?: "Affordable" | "Mid Range" | "Luxury";
   items: Array<{
     productId: string;
+    variantId?: string | null;                // ✅ added
+    attributes?: {                             // ✅ added
+      size?: string | null;
+      color?: string | null;
+      fabric?: string | null;
+    };
     name?: string;
     image?: string;
     quantity: number;
@@ -124,7 +130,6 @@ type OrdersResponse =
       pagination?: any;
     };
 
-// Response shape for single order endpoints
 type OrderResponse = {
   success?: boolean;
   message?: string;
@@ -248,6 +253,19 @@ function paymentText(o: Order) {
   const txn = p.transactionId ? ` • TXN:${p.transactionId.slice(-6)}` : "";
   return `${method}/${status}${gateway}${rp}${txn}`;
 }
+
+// Helper to get color name from hex (optional)
+const getColorName = (hex: string) => {
+  const colors: Record<string, string> = {
+    "#8B7355": "Brown",
+    "#1C1C1C": "Black",
+    "#F5E6D3": "White",
+    "#4A4A4A": "Grey",
+    "#4A6741": "Green",
+    "#2C3E50": "Blue",
+  };
+  return colors[hex.toUpperCase()] || hex;
+};
 
 export function CustomerApproveOrders() {
   const [segment, setSegment] = useState<Segment>("all");
@@ -402,7 +420,6 @@ export function CustomerApproveOrders() {
   };
 
   const handleReject = async (order: Order) => {
-    // Optional: ask for confirmation before showing prompt
     if (!window.confirm("Are you sure you want to reject this order?")) return;
 
     setActionId(order._id);
@@ -587,7 +604,7 @@ export function CustomerApproveOrders() {
       <DataTable data={orders} columns={columns} searchKey="_id" actions={actions} />
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               Order Details{" "}
@@ -730,6 +747,9 @@ export function CustomerApproveOrders() {
                     const final = Number(it.finalPrice ?? mrp);
                     const lineTotal = final * qty;
 
+                    // Extract attributes
+                    const attributes = it.attributes || {};
+
                     return (
                       <div key={`${it.productId}-${idx}`} className="flex gap-3 border rounded-lg p-3">
                         <div className="h-16 w-16 shrink-0 overflow-hidden rounded-md border bg-muted">
@@ -744,6 +764,31 @@ export function CustomerApproveOrders() {
 
                         <div className="flex-1">
                           <div className="font-medium">{name}</div>
+
+                          {/* ✅ Variant attributes */}
+                          {(attributes.color || attributes.size || attributes.fabric) && (
+                            <div className="flex flex-wrap gap-2 mt-1 text-xs">
+                              {attributes.color && (
+                                <span className="inline-flex items-center gap-1 bg-muted px-2 py-0.5 rounded-full">
+                                  <span
+                                    className="w-3 h-3 rounded-full"
+                                    style={{ backgroundColor: attributes.color }}
+                                  />
+                                  {getColorName(attributes.color)}
+                                </span>
+                              )}
+                              {attributes.size && (
+                                <span className="bg-muted px-2 py-0.5 rounded-full">
+                                  Size: {attributes.size}
+                                </span>
+                              )}
+                              {attributes.fabric && (
+                                <span className="bg-muted px-2 py-0.5 rounded-full capitalize">
+                                  {attributes.fabric}
+                                </span>
+                              )}
+                            </div>
+                          )}
 
                           <div className="mt-2 flex flex-wrap gap-3 text-sm">
                             <div>
@@ -770,6 +815,9 @@ export function CustomerApproveOrders() {
 
                           <div className="mt-2 text-xs text-muted-foreground">
                             Product ID: <span className="font-mono">{it.productId}</span>
+                            {it.variantId && (
+                              <> • Variant ID: <span className="font-mono">{it.variantId}</span></>
+                            )}
                           </div>
                         </div>
                       </div>

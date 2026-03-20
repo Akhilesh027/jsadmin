@@ -18,8 +18,8 @@ import { toast } from "@/hooks/use-toast";
 /**
  * Assumptions (adjust endpoints if yours differ):
  * GET    /api/admin/catalogs
- * PUT    /api/admin/catalogs/:id         (edit)
- * PATCH  /api/admin/catalogs/:id/status  (approve/reject)  body: { status: "approved" | "rejected" }
+ * PUT    /api/admin/catalogs/:id         (edit) – accepts discount field
+ * PATCH  /api/admin/catalogs/:id/status  (approve/reject)  body: { status: "approved" | "rejected", discount?: number }
  * DELETE /api/admin/catalogs/:id
  */
 
@@ -38,6 +38,8 @@ interface AdminCatalogItem {
   shortDescription?: string;
   description?: string;
   price: number;
+  discount?: number;               // discount percentage
+  finalPrice?: number;             // computed on frontend
   deliveryTime?: string;
   tier: Tier;
   status: CatalogStatus;
@@ -53,6 +55,11 @@ const formatCurrency = (value: number) =>
   new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(
     value
   );
+
+// Helper to compute final price
+const computeFinalPrice = (price: number, discount: number = 0): number => {
+  return price * (1 - discount / 100);
+};
 
 // -------- API helper --------
 const apiRequest = async (method: string, endpoint: string, data?: any) => {
@@ -81,6 +88,11 @@ export default function CatalogApproval() {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [viewModalOpen, setViewModalOpen] = useState(false);
 
+  // Discount approval state
+  const [discountModalOpen, setDiscountModalOpen] = useState(false);
+  const [discountValue, setDiscountValue] = useState<string>("");
+  const [pendingApprovalItem, setPendingApprovalItem] = useState<AdminCatalogItem | null>(null);
+
   const [saving, setSaving] = useState(false);
 
   // Filters
@@ -96,6 +108,7 @@ export default function CatalogApproval() {
     deliveryTime: "",
     category: "",
     tier: "mid_range" as Tier,
+    discount: "", // discount percentage
   });
 
   const tierColors: Record<Tier, string> = {
@@ -107,10 +120,14 @@ export default function CatalogApproval() {
   const fetchCatalogs = async () => {
     try {
       setLoading(true);
-      // expected response: { success: true, catalogs: [...] } or { catalogs: [...] }
       const data = await apiRequest("GET", "/api/admin/catalogs");
       const catalogs: AdminCatalogItem[] = data.catalogs || data.items || [];
-      setItems(catalogs);
+      // Compute final price if discount exists
+      const processed = catalogs.map(item => ({
+        ...item,
+        finalPrice: computeFinalPrice(item.price, item.discount)
+      }));
+      setItems(processed);
     } catch (err: any) {
       toast({
         title: "Error",
@@ -152,6 +169,7 @@ export default function CatalogApproval() {
       deliveryTime: item.deliveryTime || "",
       category: item.category || "",
       tier: item.tier || "mid_range",
+      discount: item.discount?.toString() ?? "0",
     });
     setEditModalOpen(true);
   };
@@ -161,27 +179,87 @@ export default function CatalogApproval() {
     setViewModalOpen(true);
   };
 
-  const updateStatus = async (item: AdminCatalogItem, status: CatalogStatus) => {
+  const openDiscountModal = (item: AdminCatalogItem) => {
+    setPendingApprovalItem(item);
+    setDiscountValue(item.discount?.toString() ?? "0");
+    setDiscountModalOpen(true);
+  };
+
+  const confirmApproveWithDiscount = async () => {
+    if (!pendingApprovalItem) return;
+    const discount = parseFloat(discountValue);
+    if (isNaN(discount) || discount < 0 || discount > 100) {
+      toast({
+        title: "Invalid discount",
+        description: "Discount must be a number between 0 and 100.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       setSaving(true);
-
-      // PATCH /api/admin/catalogs/:id/status { status }
       const data = await apiRequest(
         "PATCH",
-        `/api/admin/catalogs/${item._id}/status`,
-        { status }
+        `/api/admin/catalogs/${pendingApprovalItem._id}/status`,
+        { status: "approved", discount }
       );
 
       const updated = data.catalog || data.item;
 
       setItems((prev) =>
-        prev.map((x) => (x._id === item._id ? (updated || { ...x, status }) : x))
+        prev.map((x) => {
+          if (x._id === pendingApprovalItem._id) {
+            const newItem = updated || { ...x, status: "approved", discount };
+            return {
+              ...newItem,
+              finalPrice: computeFinalPrice(newItem.price, newItem.discount)
+            };
+          }
+          return x;
+        })
       );
 
       toast({
-        title: status === "approved" ? "Catalog Approved" : "Catalog Rejected",
-        description: `${item.productName} marked as ${status}.`,
-        variant: status === "rejected" ? "destructive" : "default",
+        title: "Catalog Approved",
+        description: `${pendingApprovalItem.productName} approved with ${discount}% discount.`,
+      });
+
+      setDiscountModalOpen(false);
+      setPendingApprovalItem(null);
+    } catch (err: any) {
+      toast({
+        title: "Error",
+        description: err.message || "Failed to approve catalog",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateStatus = async (item: AdminCatalogItem, status: CatalogStatus) => {
+    if (status === "approved") {
+      openDiscountModal(item);
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await apiRequest(
+        "PATCH",
+        `/api/admin/catalogs/${item._id}/status`,
+        { status }
+      );
+
+      setItems((prev) =>
+        prev.map((x) => (x._id === item._id ? { ...x, status } : x))
+      );
+
+      toast({
+        title: "Catalog Rejected",
+        description: `${item.productName} marked as rejected.`,
+        variant: "destructive",
       });
     } catch (err: any) {
       toast({
@@ -216,10 +294,19 @@ export default function CatalogApproval() {
       return;
     }
 
+    const discountNum = parseFloat(editForm.discount);
+    if (isNaN(discountNum) || discountNum < 0 || discountNum > 100) {
+      toast({
+        title: "Error",
+        description: "Discount must be a number between 0 and 100.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       setSaving(true);
 
-      // PUT /api/admin/catalogs/:id (edit fields)
       const payload = {
         productName: editForm.productName.trim(),
         category: editForm.category.trim(),
@@ -228,6 +315,7 @@ export default function CatalogApproval() {
         description: editForm.description.trim(),
         deliveryTime: editForm.deliveryTime.trim(),
         tier: editForm.tier,
+        discount: discountNum,
       };
 
       const data = await apiRequest(
@@ -239,7 +327,16 @@ export default function CatalogApproval() {
       const updated = data.catalog || data.item;
 
       setItems((prev) =>
-        prev.map((x) => (x._id === selectedItem._id ? (updated || { ...x, ...payload }) : x))
+        prev.map((x) => {
+          if (x._id === selectedItem._id) {
+            const newItem = updated || { ...x, ...payload };
+            return {
+              ...newItem,
+              finalPrice: computeFinalPrice(newItem.price, newItem.discount)
+            };
+          }
+          return x;
+        })
       );
 
       toast({
@@ -265,9 +362,7 @@ export default function CatalogApproval() {
 
     try {
       setSaving(true);
-
       await apiRequest("DELETE", `/api/admin/catalogs/${item._id}`);
-
       setItems((prev) => prev.filter((x) => x._id !== item._id));
 
       if (selectedItem?._id === item._id) {
@@ -289,6 +384,14 @@ export default function CatalogApproval() {
     } finally {
       setSaving(false);
     }
+  };
+
+  // Helper to get final price preview in edit modal
+  const getEditFinalPrice = () => {
+    const price = parseFloat(editForm.price);
+    const discount = parseFloat(editForm.discount);
+    if (isNaN(price) || isNaN(discount)) return null;
+    return computeFinalPrice(price, discount);
   };
 
   if (loading) {
@@ -387,14 +490,26 @@ export default function CatalogApproval() {
                   {item.shortDescription || item.description || "—"}
                 </p>
 
-                <div className="flex items-center justify-between mb-4">
-                  <span className="text-lg font-bold text-foreground">
-                    {formatCurrency(item.price)}
-                  </span>
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <span className="text-lg font-bold text-foreground">
+                      {formatCurrency(item.finalPrice ?? item.price)}
+                    </span>
+                    {item.discount && item.discount > 0 && (
+                      <span className="ml-2 text-xs line-through text-muted-foreground">
+                        {formatCurrency(item.price)}
+                      </span>
+                    )}
+                  </div>
                   <span className={`badge-status ${tierColors[item.tier]}`}>
                     {item.tier.replace("_", " ")}
                   </span>
                 </div>
+                {item.discount && item.discount > 0 && (
+                  <p className="text-xs text-success mb-3">
+                    {item.discount}% discount applied
+                  </p>
+                )}
 
                 <div className="flex items-center gap-2">
                   <Button
@@ -457,6 +572,54 @@ export default function CatalogApproval() {
         </div>
       )}
 
+      {/* Discount Approval Modal */}
+      <Dialog open={discountModalOpen} onOpenChange={setDiscountModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Approve with Discount</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <p className="text-sm text-muted-foreground">
+              Enter discount percentage to apply to <strong>{pendingApprovalItem?.productName}</strong>.
+              Leave 0 for no discount.
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="discount">Discount (%)</Label>
+              <Input
+                id="discount"
+                type="number"
+                step="0.1"
+                min="0"
+                max="100"
+                value={discountValue}
+                onChange={(e) => setDiscountValue(e.target.value)}
+                placeholder="0"
+                disabled={saving}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDiscountModalOpen(false)}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+            <Button onClick={confirmApproveWithDiscount} disabled={saving}>
+              {saving ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Approving...
+                </>
+              ) : (
+                "Approve"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* View Modal */}
       <Dialog open={viewModalOpen} onOpenChange={setViewModalOpen}>
         <DialogContent className="max-w-2xl">
@@ -502,8 +665,21 @@ export default function CatalogApproval() {
                 </div>
                 <div>
                   <Label className="text-muted-foreground">Price</Label>
-                  <p className="font-medium">{formatCurrency(selectedItem.price)}</p>
+                  <p className="font-medium">
+                    {formatCurrency(selectedItem.finalPrice ?? selectedItem.price)}
+                    {selectedItem.discount && selectedItem.discount > 0 && (
+                      <span className="ml-2 text-xs line-through text-muted-foreground">
+                        {formatCurrency(selectedItem.price)}
+                      </span>
+                    )}
+                  </p>
                 </div>
+                {selectedItem.discount && selectedItem.discount > 0 && (
+                  <div>
+                    <Label className="text-muted-foreground">Discount</Label>
+                    <p className="font-medium text-success">{selectedItem.discount}%</p>
+                  </div>
+                )}
                 <div>
                   <Label className="text-muted-foreground">Delivery Time</Label>
                   <p className="font-medium">{selectedItem.deliveryTime || "—"}</p>
@@ -527,7 +703,7 @@ export default function CatalogApproval() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Modal */}
+      {/* Edit Modal with Final Price Preview */}
       <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
@@ -551,6 +727,7 @@ export default function CatalogApproval() {
                   <Label>Price (₹)</Label>
                   <Input
                     type="number"
+                    step="0.01"
                     value={editForm.price}
                     onChange={(e) =>
                       setEditForm((p) => ({ ...p, price: e.target.value }))
@@ -587,6 +764,52 @@ export default function CatalogApproval() {
                   </select>
                 </div>
               </div>
+
+              <div className="space-y-2">
+                <Label>Discount (%)</Label>
+                <Input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max="100"
+                  value={editForm.discount}
+                  onChange={(e) =>
+                    setEditForm((p) => ({ ...p, discount: e.target.value }))
+                  }
+                  disabled={saving}
+                  placeholder="0"
+                />
+              </div>
+
+              {/* Final Price Preview */}
+              {(() => {
+                const finalPrice = getEditFinalPrice();
+                const price = parseFloat(editForm.price);
+                const discount = parseFloat(editForm.discount);
+                const showPreview = !isNaN(finalPrice) && !isNaN(price);
+                return showPreview ? (
+                  <div className="bg-muted/30 rounded-lg p-3 border border-border">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Final Price after discount:</span>
+                      <div>
+                        <span className="font-bold text-foreground">
+                          {formatCurrency(finalPrice)}
+                        </span>
+                        {discount > 0 && (
+                          <span className="ml-2 text-xs line-through text-muted-foreground">
+                            {formatCurrency(price)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {discount > 0 && (
+                      <div className="text-xs text-success mt-1">
+                        {discount}% discount applied
+                      </div>
+                    )}
+                  </div>
+                ) : null;
+              })()}
 
               <div className="space-y-2">
                 <Label>Short Description</Label>

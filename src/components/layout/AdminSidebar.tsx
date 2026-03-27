@@ -35,6 +35,7 @@ interface NavItem {
   children?: NavItem[];
 }
 
+// Role-specific navigation sets
 const coreAdminNav: NavItem[] = [
   { title: "Dashboard", href: "/cap", icon: LayoutDashboard },
   {
@@ -60,17 +61,12 @@ const coreAdminNav: NavItem[] = [
     ],
   },
   { title: "Customers", href: "/cap/customers", icon: Users },
-    { title: "Coupons", href: "/cap/coupons", icon: Ticket }, // ✅ added
-    { title: "Categories", href: "/cap/categories", icon: Layers },
-    { title: "Banners", href: "/cap/banners", icon: ImageIcon },
-    {
-  title: "Shipping Costs",
-  href: "/admin/shipping-costs",
-  icon: Truck,
-},
-
-    { title: "Estimates", href: "/admin/estimates", icon: FileText },
-    { title: "Reports", href: "/cap/reports", icon: FileText },
+  { title: "Coupons", href: "/cap/coupons", icon: Ticket },
+  { title: "Categories", href: "/cap/categories", icon: Layers },
+  { title: "Banners", href: "/cap/banners", icon: ImageIcon },
+  { title: "Shipping Costs", href: "/admin/shipping-costs", icon: Truck },
+  { title: "Estimates", href: "/admin/estimates", icon: FileText },
+  { title: "Reports", href: "/cap/reports", icon: FileText },
 ];
 
 const manufacturerAdminNav: NavItem[] = [
@@ -79,9 +75,7 @@ const manufacturerAdminNav: NavItem[] = [
   { title: "Place Orders", href: "/pap/manufacturer/orders/place", icon: Package },
   { title: "Track Orders", href: "/pap/manufacturer/orders/track", icon: Truck },
   { title: "Order History", href: "/pap/manufacturer/orders/history", icon: History },
- // { title: "Forward Catalogs", href: "/pap/manufacturer/forward", icon: Forward },
-  { title: "Reports", href: "/pap/manufacturer/reports", icon: BarChart3},
-
+  { title: "Reports", href: "/pap/manufacturer/reports", icon: BarChart3 },
   { title: "Manufacturer List", href: "/pap/manufacturer/list", icon: Factory },
 ];
 
@@ -91,7 +85,6 @@ const vendorAdminNav: NavItem[] = [
   { title: "Order History", href: "/pap/vendor/orders/history", icon: History },
   { title: "Track Orders", href: "/pap/vendor/orders/track", icon: Truck },
   { title: "Reports", href: "/pap/vendor/reports", icon: BarChart3 },
-
   { title: "Vendor List", href: "/pap/vendor/list", icon: Store },
 ];
 
@@ -101,8 +94,7 @@ const ecommerceAdminNav: NavItem[] = [
   { title: "Order History", href: "/eap/orders/history", icon: History },
   { title: "Track Orders", href: "/eap/orders/track", icon: Truck },
   { title: "Reports", href: "/eap/reports", icon: BarChart3 },
-{ title: "Legal Pages", href: "/eap/legal-pages", icon: FileText },
-
+  { title: "Legal Pages", href: "/eap/legal-pages", icon: FileText },
   { title: "Customer List", href: "/eap/customers", icon: Users },
 ];
 
@@ -122,6 +114,22 @@ const roleLabel = (role?: string) => {
   return role.replaceAll("_", " ").toUpperCase();
 };
 
+// Map role to nav items
+const roleToNavItems: Record<string, NavItem[]> = {
+  cap_admin: coreAdminNav,
+  manufacturer_admin: manufacturerAdminNav,
+  vendor_admin: vendorAdminNav,
+  ecommerce_admin: ecommerceAdminNav,
+};
+
+// Map role to panel title
+const roleToTitle: Record<string, string> = {
+  cap_admin: "Core Admin Panel",
+  manufacturer_admin: "Manufacturer Panel",
+  vendor_admin: "Vendor Panel",
+  ecommerce_admin: "Ecommerce Panel",
+};
+
 export function AdminSidebar({ panelType }: AdminSidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -129,7 +137,7 @@ export function AdminSidebar({ panelType }: AdminSidebarProps) {
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
-  // ✅ Load admin details from localStorage
+  // Load admin details from localStorage
   const admin: StoredAdmin = useMemo(() => {
     try {
       return JSON.parse(localStorage.getItem("admin") || "{}");
@@ -138,37 +146,20 @@ export function AdminSidebar({ panelType }: AdminSidebarProps) {
     }
   }, []);
 
-  const getNavItems = () => {
-    switch (panelType) {
-      case "cap":
-        return coreAdminNav;
-      case "pap-manufacturer":
-        return manufacturerAdminNav;
-      case "pap-vendor":
-        return vendorAdminNav;
-      case "eap":
-        return ecommerceAdminNav;
-      default:
-        return [];
-    }
-  };
+  const role = admin?.role || "";
+  const isCoreAdmin = role === "cap_admin";
 
-  const getPanelTitle = () => {
-    switch (panelType) {
-      case "cap":
-        return "Core Admin Panel";
-      case "pap-manufacturer":
-        return "Manufacturer Panel";
-      case "pap-vendor":
-        return "Vendor Panel";
-      case "eap":
-        return "Ecommerce Panel";
-      default:
-        return "Admin Panel";
-    }
-  };
+  // Get nav items based on role
+  const navItems = useMemo(() => {
+    return roleToNavItems[role] || [];
+  }, [role]);
 
-  // ✅ Logout: remove token + admin, redirect to login
+  // Panel title based on role
+  const panelTitle = useMemo(() => {
+    return roleToTitle[role] || "Admin Panel";
+  }, [role]);
+
+  // Logout handler
   const handleLogout = () => {
     localStorage.removeItem("Admintoken");
     localStorage.removeItem("admin");
@@ -191,7 +182,7 @@ export function AdminSidebar({ panelType }: AdminSidebarProps) {
       });
     };
 
-    checkAndExpand(getNavItems());
+    checkAndExpand(navItems);
 
     if (itemsToExpand.length > 0) {
       setExpandedItems((prev) => [
@@ -199,14 +190,11 @@ export function AdminSidebar({ panelType }: AdminSidebarProps) {
         ...itemsToExpand.filter((item) => !prev.includes(item)),
       ]);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname, panelType]);
+  }, [location.pathname, navItems]);
 
   const toggleExpanded = (title: string) => {
     setExpandedItems((prev) => (prev.includes(title) ? prev.filter((t) => t !== title) : [...prev, title]));
   };
-
-  const navItems = getNavItems();
 
   const renderNavItem = (item: NavItem, level = 0) => {
     const hasChildren = item.children && item.children.length > 0;
@@ -294,59 +282,63 @@ export function AdminSidebar({ panelType }: AdminSidebarProps) {
             </div>
             <div>
               <h1 className="font-display text-lg font-bold text-sidebar-foreground">JS GALLOR</h1>
-              <p className="text-xs text-sidebar-foreground/60">{getPanelTitle()}</p>
+              <p className="text-xs text-sidebar-foreground/60">{panelTitle}</p>
             </div>
           </div>
         </div>
 
         {/* Navigation */}
         <div className="flex-1 overflow-hidden">
-          <nav className="h-full overflow-y-auto p-4 space-y-0.5">{navItems.map((item) => renderNavItem(item))}</nav>
+          <nav className="h-full overflow-y-auto p-4 space-y-0.5">
+            {navItems.map((item) => renderNavItem(item))}
+          </nav>
         </div>
 
         {/* Bottom */}
         <div className="flex-shrink-0">
-          {/* Panel Switcher */}
-          <div className="border-t border-sidebar-border p-4">
-            <p className="text-xs text-sidebar-foreground/50 mb-2 px-2">Switch Panel</p>
-            <div className="space-y-1">
-              <NavLink
-                to="/cap"
-                className={({ isActive }) => cn("sidebar-link text-sm", isActive && "sidebar-link-active")}
-                onClick={() => setIsMobileOpen(false)}
-              >
-                <Shield className="h-4 w-4" />
-                <span>Core Admin</span>
-              </NavLink>
+          {/* Panel Switcher – only shown to core admins */}
+          {isCoreAdmin && (
+            <div className="border-t border-sidebar-border p-4">
+              <p className="text-xs text-sidebar-foreground/50 mb-2 px-2">Switch Panel</p>
+              <div className="space-y-1">
+                <NavLink
+                  to="/cap"
+                  className={({ isActive }) => cn("sidebar-link text-sm", isActive && "sidebar-link-active")}
+                  onClick={() => setIsMobileOpen(false)}
+                >
+                  <Shield className="h-4 w-4" />
+                  <span>Core Admin</span>
+                </NavLink>
 
-              <NavLink
-                to="/pap/manufacturer"
-                className={({ isActive }) => cn("sidebar-link text-sm", isActive && "sidebar-link-active")}
-                onClick={() => setIsMobileOpen(false)}
-              >
-                <Factory className="h-4 w-4" />
-                <span>Manufacturer</span>
-              </NavLink>
+                <NavLink
+                  to="/pap/manufacturer"
+                  className={({ isActive }) => cn("sidebar-link text-sm", isActive && "sidebar-link-active")}
+                  onClick={() => setIsMobileOpen(false)}
+                >
+                  <Factory className="h-4 w-4" />
+                  <span>Manufacturer</span>
+                </NavLink>
 
-              <NavLink
-                to="/pap/vendor"
-                className={({ isActive }) => cn("sidebar-link text-sm", isActive && "sidebar-link-active")}
-                onClick={() => setIsMobileOpen(false)}
-              >
-                <Store className="h-4 w-4" />
-                <span>Vendor</span>
-              </NavLink>
+                <NavLink
+                  to="/pap/vendor"
+                  className={({ isActive }) => cn("sidebar-link text-sm", isActive && "sidebar-link-active")}
+                  onClick={() => setIsMobileOpen(false)}
+                >
+                  <Store className="h-4 w-4" />
+                  <span>Vendor</span>
+                </NavLink>
 
-              <NavLink
-                to="/eap"
-                className={({ isActive }) => cn("sidebar-link text-sm", isActive && "sidebar-link-active")}
-                onClick={() => setIsMobileOpen(false)}
-              >
-                <ShoppingCart className="h-4 w-4" />
-                <span>Ecommerce</span>
-              </NavLink>
+                <NavLink
+                  to="/eap"
+                  className={({ isActive }) => cn("sidebar-link text-sm", isActive && "sidebar-link-active")}
+                  onClick={() => setIsMobileOpen(false)}
+                >
+                  <ShoppingCart className="h-4 w-4" />
+                  <span>Ecommerce</span>
+                </NavLink>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* User Profile */}
           <div className="border-t border-sidebar-border p-4">
@@ -361,7 +353,6 @@ export function AdminSidebar({ panelType }: AdminSidebarProps) {
                 <p className="text-[10px] text-sidebar-foreground/40 truncate mt-0.5">{roleLabel(admin?.role)}</p>
               </div>
 
-              {/* ✅ REAL LOGOUT */}
               <Button
                 variant="ghost"
                 size="icon"

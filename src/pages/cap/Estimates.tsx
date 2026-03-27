@@ -1,7 +1,7 @@
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import React, { useEffect, useMemo, useState } from "react";
 import { toast } from "@/hooks/use-toast";
-import { Download } from "lucide-react"; // optional icon
+import { Download } from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://api.jsgallor.com";
 
@@ -13,6 +13,16 @@ type Estimate = {
   kitchen: boolean;
   wardrobe: number;
   tvUnit: number;
+  // New furniture fields
+  sofaSet: number;
+  beds: number;
+  centerTables: number;
+  crockeryUnit: number;
+  diningTableSet: number;
+  foyers: number;
+  vanityUnit: number;
+  studyUnit: number;
+  outdoorFurniture: number;
   plotSize?: string;
   floorplanPdfUrl?: string;
   floorplanImageUrls?: string[];
@@ -142,6 +152,15 @@ const AdminEstimates: React.FC = () => {
       "Kitchen",
       "Wardrobe",
       "TV Unit",
+      "Sofa Set",
+      "Beds",
+      "Center Tables",
+      "Crockery Unit",
+      "Dining Table Set",
+      "Foyers",
+      "Vanity Unit",
+      "Study Unit",
+      "Outdoor Furniture",
       "Plot Size",
       "Status",
       "Est. Amount (₹)",
@@ -161,6 +180,15 @@ const AdminEstimates: React.FC = () => {
       item.kitchen ? "Yes" : "No",
       item.wardrobe.toString(),
       item.tvUnit.toString(),
+      item.sofaSet?.toString() ?? "0",
+      item.beds?.toString() ?? "0",
+      item.centerTables?.toString() ?? "0",
+      item.crockeryUnit?.toString() ?? "0",
+      item.diningTableSet?.toString() ?? "0",
+      item.foyers?.toString() ?? "0",
+      item.vanityUnit?.toString() ?? "0",
+      item.studyUnit?.toString() ?? "0",
+      item.outdoorFurniture?.toString() ?? "0",
       item.plotSize || "—",
       item.status,
       item.estimatedAmount?.toString() || "—",
@@ -378,6 +406,22 @@ const AdminEstimates: React.FC = () => {
                     <div className="text-sm text-gray-700">Wardrobe: {selected.wardrobe}</div>
                     <div className="text-sm text-gray-700">TV Unit: {selected.tvUnit}</div>
                     <div className="text-sm text-gray-700">Plot Size: {selected.plotSize || "—"}</div>
+                  </div>
+
+                  {/* New Furniture Section */}
+                  <div className="md:col-span-2 border-t pt-4">
+                    <h3 className="font-semibold mb-3">Furniture Quantities</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 text-sm">
+                      <div>Sofa Set: {selected.sofaSet ?? 0}</div>
+                      <div>Beds: {selected.beds ?? 0}</div>
+                      <div>Center Tables: {selected.centerTables ?? 0}</div>
+                      <div>Crockery Unit: {selected.crockeryUnit ?? 0}</div>
+                      <div>Dining Table Set: {selected.diningTableSet ?? 0}</div>
+                      <div>Foyers: {selected.foyers ?? 0}</div>
+                      <div>Vanity Unit: {selected.vanityUnit ?? 0}</div>
+                      <div>Study Unit: {selected.studyUnit ?? 0}</div>
+                      <div>Outdoor Furniture: {selected.outdoorFurniture ?? 0}</div>
+                    </div>
                   </div>
 
                   {/* Admin Amounts Section */}

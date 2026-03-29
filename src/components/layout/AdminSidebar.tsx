@@ -56,9 +56,7 @@ const coreAdminNav: NavItem[] = [
   {
     title: "Vendors",
     icon: Store,
-    children: [
-      { title: "All Vendors", href: "/cap/vendors", icon: Store },
-    ],
+    children: [{ title: "All Vendors", href: "/cap/vendors", icon: Store }],
   },
   { title: "Customers", href: "/cap/customers", icon: Users },
   { title: "Coupons", href: "/cap/coupons", icon: Ticket },
@@ -71,7 +69,11 @@ const coreAdminNav: NavItem[] = [
 
 const manufacturerAdminNav: NavItem[] = [
   { title: "Dashboard", href: "/pap/manufacturer", icon: LayoutDashboard },
-  { title: "Catalog Approval", href: "/pap/manufacturer/catalog", icon: ClipboardList },
+  {
+    title: "Catalog Approval",
+    href: "/pap/manufacturer/catalog",
+    icon: ClipboardList,
+  },
   { title: "Place Orders", href: "/pap/manufacturer/orders/place", icon: Package },
   { title: "Track Orders", href: "/pap/manufacturer/orders/track", icon: Truck },
   { title: "Order History", href: "/pap/manufacturer/orders/history", icon: History },
@@ -81,7 +83,11 @@ const manufacturerAdminNav: NavItem[] = [
 
 const vendorAdminNav: NavItem[] = [
   { title: "Dashboard", href: "/pap/vendor", icon: LayoutDashboard },
-  { title: "Approve Orders", href: "/pap/vendor/orders/approve", icon: ClipboardList },
+  {
+    title: "Approve Orders",
+    href: "/pap/vendor/orders/approve",
+    icon: ClipboardList,
+  },
   { title: "Order History", href: "/pap/vendor/orders/history", icon: History },
   { title: "Track Orders", href: "/pap/vendor/orders/track", icon: Truck },
   { title: "Reports", href: "/pap/vendor/reports", icon: BarChart3 },
@@ -114,20 +120,20 @@ const roleLabel = (role?: string) => {
   return role.replaceAll("_", " ").toUpperCase();
 };
 
-// Map role to nav items
-const roleToNavItems: Record<string, NavItem[]> = {
-  cap_admin: coreAdminNav,
-  manufacturer_admin: manufacturerAdminNav,
-  vendor_admin: vendorAdminNav,
-  ecommerce_admin: ecommerceAdminNav,
+// Map panelType to nav items (source of truth for sidebar)
+const panelTypeToNavItems: Record<string, NavItem[]> = {
+  cap: coreAdminNav,
+  "pap-manufacturer": manufacturerAdminNav,
+  "pap-vendor": vendorAdminNav,
+  eap: ecommerceAdminNav,
 };
 
-// Map role to panel title
-const roleToTitle: Record<string, string> = {
-  cap_admin: "Core Admin Panel",
-  manufacturer_admin: "Manufacturer Panel",
-  vendor_admin: "Vendor Panel",
-  ecommerce_admin: "Ecommerce Panel",
+// Map panelType to panel title
+const panelTypeToTitle: Record<string, string> = {
+  cap: "Core Admin Panel",
+  "pap-manufacturer": "Manufacturer Panel",
+  "pap-vendor": "Vendor Panel",
+  eap: "Ecommerce Panel",
 };
 
 export function AdminSidebar({ panelType }: AdminSidebarProps) {
@@ -137,7 +143,7 @@ export function AdminSidebar({ panelType }: AdminSidebarProps) {
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
-  // Load admin details from localStorage
+  // Load admin details from localStorage (only for user info & logout)
   const admin: StoredAdmin = useMemo(() => {
     try {
       return JSON.parse(localStorage.getItem("admin") || "{}");
@@ -149,15 +155,15 @@ export function AdminSidebar({ panelType }: AdminSidebarProps) {
   const role = admin?.role || "";
   const isCoreAdmin = role === "cap_admin";
 
-  // Get nav items based on role
+  // Get nav items based on panelType (not role)
   const navItems = useMemo(() => {
-    return roleToNavItems[role] || [];
-  }, [role]);
+    return panelTypeToNavItems[panelType] || [];
+  }, [panelType]);
 
-  // Panel title based on role
+  // Panel title based on panelType
   const panelTitle = useMemo(() => {
-    return roleToTitle[role] || "Admin Panel";
-  }, [role]);
+    return panelTypeToTitle[panelType] || "Admin Panel";
+  }, [panelType]);
 
   // Logout handler
   const handleLogout = () => {
@@ -193,7 +199,9 @@ export function AdminSidebar({ panelType }: AdminSidebarProps) {
   }, [location.pathname, navItems]);
 
   const toggleExpanded = (title: string) => {
-    setExpandedItems((prev) => (prev.includes(title) ? prev.filter((t) => t !== title) : [...prev, title]));
+    setExpandedItems((prev) =>
+      prev.includes(title) ? prev.filter((t) => t !== title) : [...prev, title]
+    );
   };
 
   const renderNavItem = (item: NavItem, level = 0) => {
@@ -240,7 +248,13 @@ export function AdminSidebar({ panelType }: AdminSidebarProps) {
         key={item.title}
         to={item.href || "#"}
         onClick={() => setIsMobileOpen(false)}
-        className={({ isActive }) => cn("sidebar-link", isActive && "sidebar-link-active", level > 0 && "pl-8")}
+        className={({ isActive }) =>
+          cn(
+            "sidebar-link",
+            isActive && "sidebar-link-active",
+            level > 0 && "pl-8"
+          )
+        }
         style={{ paddingLeft: `${level * 0.75 + 1}rem` }}
         end
       >
@@ -264,7 +278,10 @@ export function AdminSidebar({ panelType }: AdminSidebarProps) {
 
       {/* Overlay */}
       {isMobileOpen && (
-        <div className="fixed inset-0 bg-foreground/50 z-40 lg:hidden" onClick={() => setIsMobileOpen(false)} />
+        <div
+          className="fixed inset-0 bg-foreground/50 z-40 lg:hidden"
+          onClick={() => setIsMobileOpen(false)}
+        />
       )}
 
       {/* Sidebar */}
@@ -278,10 +295,14 @@ export function AdminSidebar({ panelType }: AdminSidebarProps) {
         <div className="flex-shrink-0 h-16 border-b border-sidebar-border px-6">
           <div className="flex h-full items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg gradient-gold">
-              <span className="font-display text-lg font-bold text-sidebar-primary-foreground">JG</span>
+              <span className="font-display text-lg font-bold text-sidebar-primary-foreground">
+                JG
+              </span>
             </div>
             <div>
-              <h1 className="font-display text-lg font-bold text-sidebar-foreground">JS GALLOR</h1>
+              <h1 className="font-display text-lg font-bold text-sidebar-foreground">
+                JS GALLOR
+              </h1>
               <p className="text-xs text-sidebar-foreground/60">{panelTitle}</p>
             </div>
           </div>
@@ -299,11 +320,15 @@ export function AdminSidebar({ panelType }: AdminSidebarProps) {
           {/* Panel Switcher – only shown to core admins */}
           {isCoreAdmin && (
             <div className="border-t border-sidebar-border p-4">
-              <p className="text-xs text-sidebar-foreground/50 mb-2 px-2">Switch Panel</p>
+              <p className="text-xs text-sidebar-foreground/50 mb-2 px-2">
+                Switch Panel
+              </p>
               <div className="space-y-1">
                 <NavLink
                   to="/cap"
-                  className={({ isActive }) => cn("sidebar-link text-sm", isActive && "sidebar-link-active")}
+                  className={({ isActive }) =>
+                    cn("sidebar-link text-sm", isActive && "sidebar-link-active")
+                  }
                   onClick={() => setIsMobileOpen(false)}
                 >
                   <Shield className="h-4 w-4" />
@@ -312,7 +337,9 @@ export function AdminSidebar({ panelType }: AdminSidebarProps) {
 
                 <NavLink
                   to="/pap/manufacturer"
-                  className={({ isActive }) => cn("sidebar-link text-sm", isActive && "sidebar-link-active")}
+                  className={({ isActive }) =>
+                    cn("sidebar-link text-sm", isActive && "sidebar-link-active")
+                  }
                   onClick={() => setIsMobileOpen(false)}
                 >
                   <Factory className="h-4 w-4" />
@@ -321,7 +348,9 @@ export function AdminSidebar({ panelType }: AdminSidebarProps) {
 
                 <NavLink
                   to="/pap/vendor"
-                  className={({ isActive }) => cn("sidebar-link text-sm", isActive && "sidebar-link-active")}
+                  className={({ isActive }) =>
+                    cn("sidebar-link text-sm", isActive && "sidebar-link-active")
+                  }
                   onClick={() => setIsMobileOpen(false)}
                 >
                   <Store className="h-4 w-4" />
@@ -330,7 +359,9 @@ export function AdminSidebar({ panelType }: AdminSidebarProps) {
 
                 <NavLink
                   to="/eap"
-                  className={({ isActive }) => cn("sidebar-link text-sm", isActive && "sidebar-link-active")}
+                  className={({ isActive }) =>
+                    cn("sidebar-link text-sm", isActive && "sidebar-link-active")
+                  }
                   onClick={() => setIsMobileOpen(false)}
                 >
                   <ShoppingCart className="h-4 w-4" />
@@ -348,9 +379,15 @@ export function AdminSidebar({ panelType }: AdminSidebarProps) {
               </div>
 
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-sidebar-foreground truncate">{admin?.name || "Admin"}</p>
-                <p className="text-xs text-sidebar-foreground/50 truncate">{admin?.email || "—"}</p>
-                <p className="text-[10px] text-sidebar-foreground/40 truncate mt-0.5">{roleLabel(admin?.role)}</p>
+                <p className="text-sm font-medium text-sidebar-foreground truncate">
+                  {admin?.name || "Admin"}
+                </p>
+                <p className="text-xs text-sidebar-foreground/50 truncate">
+                  {admin?.email || "—"}
+                </p>
+                <p className="text-[10px] text-sidebar-foreground/40 truncate mt-0.5">
+                  {roleLabel(admin?.role)}
+                </p>
               </div>
 
               <Button

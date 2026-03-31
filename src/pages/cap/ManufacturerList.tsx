@@ -351,11 +351,7 @@ export default function ManufacturerList() {
         header: "Products",
         render: (mfg: MfgWithId) => <span className="font-medium">{mfg.catalogCount}</span>,
       },
-      {
-        key: "totalRevenue",
-        header: "Revenue",
-        render: (mfg: MfgWithId) => <span className="font-medium">{formatCurrency(mfg.totalRevenue)}</span>,
-      },
+     
       {
         key: "status",
         header: "Status",
@@ -498,10 +494,7 @@ export default function ManufacturerList() {
               <p className="font-medium">{selected.catalogCount ?? 0}</p>
             </div>
 
-            <div className="rounded-lg border p-3">
-              <p className="text-sm text-muted-foreground">Revenue</p>
-              <p className="font-medium">{formatCurrency(selected.totalRevenue ?? 0)}</p>
-            </div>
+          
 
             <div className="rounded-lg border p-3">
               <p className="text-sm text-muted-foreground">Orders</p>

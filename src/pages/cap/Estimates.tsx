@@ -1,7 +1,7 @@
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import React, { useEffect, useMemo, useState } from "react";
 import { toast } from "@/hooks/use-toast";
-import { Download } from "lucide-react";
+import { Download, FileText, Image as ImageIcon, X } from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://api.jsgallor.com";
 
@@ -10,10 +10,8 @@ type Estimate = {
   floorplan: string;
   purpose: string;
   propertyType: string;
-  kitchen: boolean;
-  wardrobe: number;
+  // Furniture items (kitchen & wardrobe removed)
   tvUnit: number;
-  // New furniture fields
   sofaSet: number;
   beds: number;
   centerTables: number;
@@ -24,6 +22,7 @@ type Estimate = {
   studyUnit: number;
   outdoorFurniture: number;
   plotSize?: string;
+  planFileUrl?: string;
   floorplanPdfUrl?: string;
   floorplanImageUrls?: string[];
   name?: string;
@@ -54,6 +53,8 @@ const AdminEstimates: React.FC = () => {
   const [estimatedAmount, setEstimatedAmount] = useState<number | "">("");
   const [totalAmount, setTotalAmount] = useState<number | "">("");
 
+  const [downloadingAll, setDownloadingAll] = useState(false);
+
   const getAuthHeaders = () => {
     const token = localStorage.getItem("token");
     return token ? { Authorization: `Bearer ${token}` } : {};
@@ -82,18 +83,23 @@ const AdminEstimates: React.FC = () => {
     }
   };
 
+  const fetchFullEstimate = async (id: string): Promise<Estimate> => {
+    const res = await fetch(`${API_BASE}/api/estimates/${id}`, {
+      headers: getAuthHeaders(),
+    });
+    const json: ApiResp<Estimate> = await res.json().catch(() => ({} as any));
+    if (!res.ok || !json.success) throw new Error(json.message || "Failed to fetch estimate details");
+    return json.data;
+  };
+
   const fetchDetail = async (id: string) => {
     setDetailLoading(true);
     setError("");
     try {
-      const res = await fetch(`${API_BASE}/api/estimates/${id}`, {
-        headers: getAuthHeaders(),
-      });
-      const json: ApiResp<Estimate> = await res.json().catch(() => ({} as any));
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to fetch detail");
-      setSelected(json.data);
-      setEstimatedAmount(json.data.estimatedAmount ?? "");
-      setTotalAmount(json.data.totalAmount ?? "");
+      const data = await fetchFullEstimate(id);
+      setSelected(data);
+      setEstimatedAmount(data.estimatedAmount ?? "");
+      setTotalAmount(data.totalAmount ?? "");
     } catch (e: any) {
       setError(e?.message || "Something went wrong");
       toast({ title: "Error", description: e?.message, variant: "destructive" });
@@ -137,7 +143,16 @@ const AdminEstimates: React.FC = () => {
     }
   };
 
-  // ---------- Download Helpers ----------
+  // ---------- CSV Helpers ----------
+  const escapeCSV = (value: any): string => {
+    if (value === null || value === undefined) return '""';
+    const stringValue = String(value);
+    if (stringValue.includes(",") || stringValue.includes("\n") || stringValue.includes('"')) {
+      return `"${stringValue.replace(/"/g, '""')}"`;
+    }
+    return stringValue;
+  };
+
   const downloadCSV = (data: Estimate[], filename: string) => {
     if (data.length === 0) return;
 
@@ -149,8 +164,6 @@ const AdminEstimates: React.FC = () => {
       "Home (Floorplan)",
       "Property Type",
       "Purpose",
-      "Kitchen",
-      "Wardrobe",
       "TV Unit",
       "Sofa Set",
       "Beds",
@@ -162,11 +175,12 @@ const AdminEstimates: React.FC = () => {
       "Study Unit",
       "Outdoor Furniture",
       "Plot Size",
+      "Plan File URL",
+      "PDF URL",
+      "Image URLs",
       "Status",
       "Est. Amount (₹)",
       "Total Amount (₹)",
-      "PDF URL",
-      "Image URLs",
     ];
 
     const rows = data.map((item) => [
@@ -177,9 +191,7 @@ const AdminEstimates: React.FC = () => {
       item.floorplan,
       item.propertyType,
       item.purpose,
-      item.kitchen ? "Yes" : "No",
-      item.wardrobe.toString(),
-      item.tvUnit.toString(),
+      item.tvUnit?.toString() ?? "0",
       item.sofaSet?.toString() ?? "0",
       item.beds?.toString() ?? "0",
       item.centerTables?.toString() ?? "0",
@@ -190,14 +202,19 @@ const AdminEstimates: React.FC = () => {
       item.studyUnit?.toString() ?? "0",
       item.outdoorFurniture?.toString() ?? "0",
       item.plotSize || "—",
+      item.planFileUrl || "—",
+      item.floorplanPdfUrl || "—",
+      (item.floorplanImageUrls || []).join("; "),
       item.status,
       item.estimatedAmount?.toString() || "—",
       item.totalAmount?.toString() || "—",
-      item.floorplanPdfUrl || "—",
-      (item.floorplanImageUrls || []).join("; "),
     ]);
 
-    const csvContent = [headers.join(","), ...rows.map((row) => row.join(","))].join("\n");
+    const csvContent = [
+      headers.map(escapeCSV).join(","),
+      ...rows.map((row) => row.map(escapeCSV).join(",")),
+    ].join("\n");
+
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -209,16 +226,39 @@ const AdminEstimates: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const downloadListCSV = () => {
+  const downloadListCSV = async () => {
     if (list.length === 0) {
       toast({ title: "No data", description: "No estimates to download", variant: "destructive" });
       return;
     }
-    downloadCSV(list, `estimates_${new Date().toISOString().slice(0, 10)}.csv`);
+
+    setDownloadingAll(true);
+    setError("");
+    try {
+      const fullEstimates = await Promise.all(
+        list.map((item) => fetchFullEstimate(item._id))
+      );
+      downloadCSV(fullEstimates, `estimates_${new Date().toISOString().slice(0, 10)}.csv`);
+      toast({ title: "Success", description: "All estimates downloaded" });
+    } catch (e: any) {
+      const msg = e?.message || "Failed to download all estimates";
+      setError(msg);
+      toast({ title: "Error", description: msg, variant: "destructive" });
+    } finally {
+      setDownloadingAll(false);
+    }
   };
 
-  const downloadSingleCSV = (estimate: Estimate) => {
-    downloadCSV([estimate], `estimate_${estimate._id.slice(-6)}_${new Date().toISOString().slice(0, 10)}.csv`);
+  const downloadSingleCSV = async (estimate: Estimate) => {
+    try {
+      const fullEstimate = await fetchFullEstimate(estimate._id);
+      downloadCSV([fullEstimate], `estimate_${estimate._id.slice(-6)}_${new Date().toISOString().slice(0, 10)}.csv`);
+      toast({ title: "Success", description: "Estimate downloaded" });
+    } catch (e: any) {
+      const msg = e?.message || "Failed to download estimate";
+      setError(msg);
+      toast({ title: "Error", description: msg, variant: "destructive" });
+    }
   };
 
   useEffect(() => {
@@ -227,6 +267,12 @@ const AdminEstimates: React.FC = () => {
   }, []);
 
   const total = useMemo(() => list.length, [list]);
+
+  const closeModal = () => {
+    setSelected(null);
+    setEstimatedAmount("");
+    setTotalAmount("");
+  };
 
   return (
     <AdminLayout panelType="cap" title="Admin Management" subtitle="Manage system administrators">
@@ -266,10 +312,10 @@ const AdminEstimates: React.FC = () => {
 
               <button
                 onClick={downloadListCSV}
-                className="bg-green-600 text-white px-5 py-2 rounded-lg hover:bg-green-700"
-                disabled={list.length === 0}
+                className="bg-green-600 text-white px-5 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50"
+                disabled={list.length === 0 || downloadingAll}
               >
-                Download All CSV
+                {downloadingAll ? "Fetching details..." : "Download All CSV"}
               </button>
             </div>
           </div>
@@ -356,159 +402,194 @@ const AdminEstimates: React.FC = () => {
             </div>
           </div>
 
-          {/* Detail Panel */}
+          {/* Modal */}
           {selected && (
-            <div className="mt-6 bg-white border rounded-2xl p-6">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-semibold">Estimate Details</h2>
-                  <p className="text-xs text-gray-500">ID: {selected._id}</p>
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+              onClick={closeModal}
+            >
+              <div
+                className="bg-white rounded-2xl shadow-xl max-w-5xl w-full max-h-[90vh] overflow-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Modal Header */}
+                <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold">Estimate Details</h2>
+                    <p className="text-xs text-gray-500">ID: {selected._id}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => downloadSingleCSV(selected)}
+                      className="border px-4 py-2 rounded-lg hover:bg-gray-50 flex items-center gap-2"
+                    >
+                      <Download className="h-4 w-4" /> Download CSV
+                    </button>
+                    <button
+                      onClick={closeModal}
+                      className="p-2 hover:bg-gray-100 rounded-lg"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => downloadSingleCSV(selected)}
-                    className="border px-4 py-2 rounded-lg hover:bg-gray-50 flex items-center gap-2"
-                  >
-                    <Download className="h-4 w-4" /> Download CSV
-                  </button>
-                  <button
-                    onClick={() => setSelected(null)}
-                    className="border px-4 py-2 rounded-lg hover:bg-gray-50"
-                  >
-                    Close
-                  </button>
+
+                {/* Modal Content */}
+                <div className="p-6">
+                  {detailLoading ? (
+                    <div className="py-6 text-gray-500 text-center">Loading details...</div>
+                  ) : (
+                    <div className="grid md:grid-cols-2 gap-6">
+                      {/* Customer Info */}
+                      <div className="space-y-2">
+                        <h3 className="font-semibold">Customer</h3>
+                        <div className="text-sm text-gray-700">Name: {selected.name || "—"}</div>
+                        <div className="text-sm text-gray-700">Phone: {selected.phone || "—"}</div>
+                        <div className="text-sm text-gray-700">City: {selected.city || "—"}</div>
+                        <div className="text-sm text-gray-700">
+                          WhatsApp Updates: {selected.whatsappUpdates ? "Yes" : "No"}
+                        </div>
+                        <div className="text-sm text-gray-700">
+                          Status: <b>{selected.status}</b>
+                        </div>
+                      </div>
+
+                      {/* Home & Property */}
+                      <div className="space-y-2">
+                        <h3 className="font-semibold">Home & Requirements</h3>
+                        <div className="text-sm text-gray-700">Floorplan: {selected.floorplan}</div>
+                        <div className="text-sm text-gray-700">Property Type: {selected.propertyType}</div>
+                        <div className="text-sm text-gray-700">Purpose: {selected.purpose}</div>
+                        <div className="text-sm text-gray-700">Plot Size: {selected.plotSize || "—"}</div>
+                      </div>
+
+                      {/* Furniture Quantities */}
+                      <div className="md:col-span-2 border-t pt-4">
+                        <h3 className="font-semibold mb-3">Furniture Quantities</h3>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 text-sm">
+                          <div>TV Unit: {selected.tvUnit ?? 0}</div>
+                          <div>Sofa Set: {selected.sofaSet ?? 0}</div>
+                          <div>Beds: {selected.beds ?? 0}</div>
+                          <div>Center Tables: {selected.centerTables ?? 0}</div>
+                          <div>Crockery Unit: {selected.crockeryUnit ?? 0}</div>
+                          <div>Dining Table Set: {selected.diningTableSet ?? 0}</div>
+                          <div>Foyers: {selected.foyers ?? 0}</div>
+                          <div>Vanity Unit: {selected.vanityUnit ?? 0}</div>
+                          <div>Study Unit: {selected.studyUnit ?? 0}</div>
+                          <div>Outdoor Furniture: {selected.outdoorFurniture ?? 0}</div>
+                        </div>
+                      </div>
+
+                      {/* Uploaded Files */}
+                      <div className="md:col-span-2 border-t pt-4">
+                        <h3 className="font-semibold mb-3">Uploaded Files</h3>
+                        <div className="space-y-3">
+                          {selected.planFileUrl && (
+                            <div className="flex items-start gap-2">
+                              <FileText className="h-4 w-4 text-blue-600 mt-0.5" />
+                              <div>
+                                <span className="font-medium">2D/3D Plan:</span>{" "}
+                                <a
+                                  href={selected.planFileUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-red-600 underline"
+                                >
+                                  View Plan
+                                </a>
+                              </div>
+                            </div>
+                          )}
+                          {selected.floorplanPdfUrl && (
+                            <div className="flex items-start gap-2">
+                              <FileText className="h-4 w-4 text-blue-600 mt-0.5" />
+                              <div>
+                                <span className="font-medium">Floorplan PDF:</span>{" "}
+                                <a
+                                  href={selected.floorplanPdfUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-red-600 underline"
+                                >
+                                  Open PDF
+                                </a>
+                              </div>
+                            </div>
+                          )}
+                          {selected.floorplanImageUrls && selected.floorplanImageUrls.length > 0 && (
+                            <div>
+                              <div className="flex items-center gap-2 mb-2">
+                                <ImageIcon className="h-4 w-4 text-blue-600" />
+                                <span className="font-medium">Floorplan Images:</span>
+                              </div>
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                {selected.floorplanImageUrls.map((url, idx) => (
+                                  <a key={idx} href={url} target="_blank" rel="noreferrer">
+                                    <img
+                                      src={url}
+                                      alt={`floorplan-${idx}`}
+                                      className="w-full h-24 object-cover rounded-lg border"
+                                    />
+                                  </a>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {!selected.planFileUrl && !selected.floorplanPdfUrl && (!selected.floorplanImageUrls?.length) && (
+                            <div className="text-gray-500 text-sm">No files uploaded.</div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Admin Amounts Section */}
+                      <div className="md:col-span-2 border-t pt-4">
+                        <h3 className="font-semibold mb-3">Admin Amounts</h3>
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm text-gray-600 mb-1">Estimated Amount (₹)</label>
+                            <input
+                              type="number"
+                              value={estimatedAmount}
+                              onChange={(e) =>
+                                setEstimatedAmount(e.target.value ? Number(e.target.value) : "")
+                              }
+                              placeholder="Enter estimated amount"
+                              className="w-full border rounded-lg px-3 py-2"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-gray-600 mb-1">Total Amount (₹)</label>
+                            <input
+                              type="number"
+                              value={totalAmount}
+                              onChange={(e) =>
+                                setTotalAmount(e.target.value ? Number(e.target.value) : "")
+                              }
+                              placeholder="Enter total amount"
+                              className="w-full border rounded-lg px-3 py-2"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex justify-end mt-4">
+                          <button
+                            onClick={handleSaveAmounts}
+                            disabled={saving}
+                            className="bg-red-600 text-white px-6 py-2 rounded-lg hover:bg-red-700 disabled:opacity-50"
+                          >
+                            {saving ? "Saving..." : "Save Amounts"}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Timestamps */}
+                      <div className="md:col-span-2 text-xs text-gray-500">
+                        Created: {new Date(selected.createdAt).toLocaleString()} | Updated:{" "}
+                        {new Date(selected.updatedAt).toLocaleString()}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
-
-              {detailLoading ? (
-                <div className="py-6 text-gray-500">Loading details...</div>
-              ) : (
-                <div className="grid md:grid-cols-2 gap-6 mt-5">
-                  <div className="space-y-2">
-                    <h3 className="font-semibold">Customer</h3>
-                    <div className="text-sm text-gray-700">Name: {selected.name || "—"}</div>
-                    <div className="text-sm text-gray-700">Phone: {selected.phone || "—"}</div>
-                    <div className="text-sm text-gray-700">City: {selected.city || "—"}</div>
-                    <div className="text-sm text-gray-700">
-                      WhatsApp Updates: {selected.whatsappUpdates ? "Yes" : "No"}
-                    </div>
-                    <div className="text-sm text-gray-700">
-                      Status: <b>{selected.status}</b>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <h3 className="font-semibold">Home & Requirements</h3>
-                    <div className="text-sm text-gray-700">Floorplan: {selected.floorplan}</div>
-                    <div className="text-sm text-gray-700">Property Type: {selected.propertyType}</div>
-                    <div className="text-sm text-gray-700">Purpose: {selected.purpose}</div>
-                    <div className="text-sm text-gray-700">Kitchen: {selected.kitchen ? "Yes" : "No"}</div>
-                    <div className="text-sm text-gray-700">Wardrobe: {selected.wardrobe}</div>
-                    <div className="text-sm text-gray-700">TV Unit: {selected.tvUnit}</div>
-                    <div className="text-sm text-gray-700">Plot Size: {selected.plotSize || "—"}</div>
-                  </div>
-
-                  {/* New Furniture Section */}
-                  <div className="md:col-span-2 border-t pt-4">
-                    <h3 className="font-semibold mb-3">Furniture Quantities</h3>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 text-sm">
-                      <div>Sofa Set: {selected.sofaSet ?? 0}</div>
-                      <div>Beds: {selected.beds ?? 0}</div>
-                      <div>Center Tables: {selected.centerTables ?? 0}</div>
-                      <div>Crockery Unit: {selected.crockeryUnit ?? 0}</div>
-                      <div>Dining Table Set: {selected.diningTableSet ?? 0}</div>
-                      <div>Foyers: {selected.foyers ?? 0}</div>
-                      <div>Vanity Unit: {selected.vanityUnit ?? 0}</div>
-                      <div>Study Unit: {selected.studyUnit ?? 0}</div>
-                      <div>Outdoor Furniture: {selected.outdoorFurniture ?? 0}</div>
-                    </div>
-                  </div>
-
-                  {/* Admin Amounts Section */}
-                  <div className="md:col-span-2 border-t pt-4">
-                    <h3 className="font-semibold mb-3">Admin Amounts</h3>
-                    <div className="grid sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm text-gray-600 mb-1">Estimated Amount (₹)</label>
-                        <input
-                          type="number"
-                          value={estimatedAmount}
-                          onChange={(e) =>
-                            setEstimatedAmount(e.target.value ? Number(e.target.value) : "")
-                          }
-                          placeholder="Enter estimated amount"
-                          className="w-full border rounded-lg px-3 py-2"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm text-gray-600 mb-1">Total Amount (₹)</label>
-                        <input
-                          type="number"
-                          value={totalAmount}
-                          onChange={(e) =>
-                            setTotalAmount(e.target.value ? Number(e.target.value) : "")
-                          }
-                          placeholder="Enter total amount"
-                          className="w-full border rounded-lg px-3 py-2"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex justify-end mt-4">
-                      <button
-                        onClick={handleSaveAmounts}
-                        disabled={saving}
-                        className="bg-red-600 text-white px-6 py-2 rounded-lg hover:bg-red-700 disabled:opacity-50"
-                      >
-                        {saving ? "Saving..." : "Save Amounts"}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <h3 className="font-semibold mb-2">Floorplan Files</h3>
-                    <div className="flex flex-col gap-2">
-                      <div className="text-sm">
-                        PDF:{" "}
-                        {selected.floorplanPdfUrl ? (
-                          <a
-                            className="text-red-600 underline"
-                            href={selected.floorplanPdfUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Open PDF
-                          </a>
-                        ) : (
-                          "—"
-                        )}
-                      </div>
-                      <div className="text-sm">
-                        Images:{" "}
-                        {selected.floorplanImageUrls?.length ? (
-                          <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-3">
-                            {selected.floorplanImageUrls.map((url, idx) => (
-                              <a key={idx} href={url} target="_blank" rel="noreferrer">
-                                <img
-                                  src={url}
-                                  alt={`floorplan-${idx}`}
-                                  className="w-full h-24 object-cover rounded-lg border"
-                                />
-                              </a>
-                            ))}
-                          </div>
-                        ) : (
-                          "—"
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="md:col-span-2 text-xs text-gray-500">
-                    Created: {new Date(selected.createdAt).toLocaleString()} | Updated:{" "}
-                    {new Date(selected.updatedAt).toLocaleString()}
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </div>

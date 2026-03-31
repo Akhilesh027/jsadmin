@@ -38,6 +38,8 @@ import {
   XCircle,
   Loader2,
   RefreshCcw,
+  Upload,
+  X,
 } from "lucide-react";
 
 /** ---------------------------
@@ -56,6 +58,7 @@ type Category = {
   description?: string;
 
   imageUrl?: string;
+  imagePublicId?: string;
 
   status: CategoryStatus;
   order: number;
@@ -120,20 +123,23 @@ const statusVariant = (s: CategoryStatus) => {
 /** ---------------------------
  * API
  * -------------------------- */
-// ✅ change base if needed
 const API_BASE = "https://api.jsgallor.com/api/admin/categories";
 
 function getAdminToken() {
-  // ✅ change if your token key is different
   return localStorage.getItem("admin_token") || "";
 }
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getAdminToken();
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
     ...(options.headers as any),
   };
+  
+  // Don't set Content-Type for FormData, let browser set it with boundary
+  if (!(options.body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
+  }
+  
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
@@ -157,7 +163,6 @@ function buildQuery(params: Record<string, any>) {
  * Page
  * -------------------------- */
 export default function CategoryManagement() {
-  // ✅ backend state
   const [categories, setCategories] = useState<Category[]>([]);
   const [stats, setStats] = useState<{ total: number; active: number; hidden: number; disabled: number; featured: number }>({
     total: 0,
@@ -177,7 +182,6 @@ export default function CategoryManagement() {
   const [level, setLevel] = useState<"all" | "parent" | "child">("all");
   const [sort, setSort] = useState<"newest" | "oldest" | "az" | "order" | "most_products">("order");
 
-  // (optional) pagination
   const [page, setPage] = useState(1);
   const limit = 50;
   const [totalItems, setTotalItems] = useState(0);
@@ -194,7 +198,6 @@ export default function CategoryManagement() {
     return () => clearTimeout(t);
   }, [q]);
 
-  // abort controller safety
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchCategories = async (nextPage = page) => {
@@ -215,8 +218,6 @@ export default function CategoryManagement() {
         limit,
       });
 
-      // NOTE: We can't pass signal into apiFetch currently because it builds fetch internally.
-      // For simplicity keep as is. If you want signal support, I can adjust apiFetch.
       const res = await apiFetch<ListResponse>(`${qs}`, { method: "GET" });
 
       setCategories(res.data.items);
@@ -230,12 +231,9 @@ export default function CategoryManagement() {
     }
   };
 
-  // fetch when filters change
   useEffect(() => {
     setPage(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     fetchCategories(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qDebounced, segment, status, level, sort]);
 
   const parents = useMemo(() => categories.filter((c) => !c.parentId), [categories]);
@@ -243,11 +241,7 @@ export default function CategoryManagement() {
   const parentName = (parentId?: string | null) =>
     parentId ? categories.find((c) => c.id === parentId)?.name || "—" : "—";
 
-  /** ---------------------------
-   * Actions (API)
-   * -------------------------- */
   const exportCSV = () => {
-    // ✅ download from backend export endpoint using current filters
     const qs = buildQuery({ q: qDebounced, segment, status, level, sort });
     const url = `${API_BASE}/export${qs}`;
 
@@ -276,7 +270,7 @@ export default function CategoryManagement() {
     try {
       await apiFetch<{ success: boolean; message?: string; data?: any }>(`/${id}`, { method: "DELETE" });
       toast({ title: "Deleted", description: "Category deleted.", variant: "destructive" });
-      // if last item deleted on page, go back a page (simple)
+      
       const nextTotal = Math.max(0, totalItems - 1);
       const maxPage = Math.max(1, Math.ceil(nextTotal / limit));
       const nextPage = Math.min(page, maxPage);
@@ -286,13 +280,9 @@ export default function CategoryManagement() {
     }
   };
 
-  /** ---------------------------
-   * Render
-   * -------------------------- */
   return (
     <AdminLayout panelType="cap">
       <div className="p-6 space-y-6">
-        {/* Header */}
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-2xl font-bold">Category Management</h1>
@@ -317,7 +307,6 @@ export default function CategoryManagement() {
           </div>
         </div>
 
-        {/* Stats */}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <StatCard icon={Layers} label="Total Categories" value={stats.total} />
           <StatCard icon={CheckCircle} label="Active" value={stats.active} />
@@ -326,7 +315,6 @@ export default function CategoryManagement() {
           <StatCard icon={Tag} label="Featured" value={stats.featured} />
         </div>
 
-        {/* Filters */}
         <Card>
           <CardContent className="p-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -413,7 +401,7 @@ export default function CategoryManagement() {
                     <Th className="text-center">Order</Th>
                     <Th>Updated</Th>
                     <Th className="text-right pr-4">Actions</Th>
-                  </tr>
+                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
@@ -437,7 +425,6 @@ export default function CategoryManagement() {
                         <Td>
                           <div className="font-medium flex items-center gap-2">
                             {c.imageUrl ? (
-                              // eslint-disable-next-line @next/next/no-img-element
                               <img
                                 src={c.imageUrl}
                                 alt={c.name}
@@ -496,7 +483,6 @@ export default function CategoryManagement() {
               </table>
             </div>
 
-            {/* Pagination (optional) */}
             <div className="flex items-center justify-between p-4 border-t text-sm">
               <div className="text-muted-foreground">
                 Showing <span className="font-medium">{categories.length}</span> of{" "}
@@ -527,18 +513,17 @@ export default function CategoryManagement() {
           </CardContent>
         </Card>
 
-        {/* Create */}
         <CategoryFormDialog
           open={openCreate}
           onOpenChange={setOpenCreate}
           title="Create Category"
           initial={null}
           parents={parents}
-          onSave={async (payload) => {
+          onSave={async (formData) => {
             try {
               await apiFetch<{ success: boolean; message?: string; data?: any }>(``, {
                 method: "POST",
-                body: JSON.stringify(payload),
+                body: formData,
               });
               toast({ title: "Created", description: "Category created successfully." });
               setOpenCreate(false);
@@ -549,19 +534,18 @@ export default function CategoryManagement() {
           }}
         />
 
-        {/* Edit */}
         <CategoryFormDialog
           open={!!openEdit}
           onOpenChange={(v) => !v && setOpenEdit(null)}
           title="Edit Category"
           initial={openEdit}
           parents={parents.filter((p) => p.id !== openEdit?.id)}
-          onSave={async (payload) => {
+          onSave={async (formData) => {
             if (!openEdit) return;
             try {
               await apiFetch<{ success: boolean; message?: string; data?: any }>(`/${openEdit.id}`, {
                 method: "PUT",
-                body: JSON.stringify(payload),
+                body: formData,
               });
               toast({ title: "Updated", description: "Category updated successfully." });
               setOpenEdit(null);
@@ -572,7 +556,6 @@ export default function CategoryManagement() {
           }}
         />
 
-        {/* View */}
         <Dialog open={!!openView} onOpenChange={(v) => !v && setOpenView(null)}>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
@@ -582,10 +565,19 @@ export default function CategoryManagement() {
             {openView && (
               <div className="space-y-4">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-xl font-semibold">{openView.name}</div>
-                    <div className="text-sm text-muted-foreground">
-                      /{openView.slug} • {openView.segment.toUpperCase()}
+                  <div className="flex gap-3">
+                    {openView.imageUrl && (
+                      <img
+                        src={openView.imageUrl}
+                        alt={openView.name}
+                        className="h-16 w-16 rounded-md object-cover border"
+                      />
+                    )}
+                    <div>
+                      <div className="text-xl font-semibold">{openView.name}</div>
+                      <div className="text-sm text-muted-foreground">
+                        /{openView.slug} • {openView.segment.toUpperCase()}
+                      </div>
                     </div>
                   </div>
                   <Badge variant={statusVariant(openView.status) as any}>
@@ -659,6 +651,7 @@ function StatCard({ icon: Icon, label, value }: { icon: any; label: string; valu
 function Th({ children, className }: any) {
   return <th className={cn("p-4 font-semibold text-muted-foreground", className)}>{children}</th>;
 }
+
 function Td({ children, className }: any) {
   return <td className={cn("p-4 align-top", className)}>{children}</td>;
 }
@@ -673,10 +666,8 @@ function Info({ label, value }: { label: string; value: string }) {
 }
 
 /** ---------------------------
- * Form Dialog
+ * Form Dialog with Image Upload
  * -------------------------- */
-type CategoryFormPayload = Omit<Category, "id" | "createdAt" | "updatedAt" | "productCount">;
-
 function CategoryFormDialog({
   open,
   onOpenChange,
@@ -690,14 +681,16 @@ function CategoryFormDialog({
   title: string;
   initial: Category | null;
   parents: Category[];
-  onSave: (payload: CategoryFormPayload) => void | Promise<void>;
+  onSave: (formData: FormData) => void | Promise<void>;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [slug, setSlug] = useState(initial?.slug ?? "");
   const [segment, setSegment] = useState<Segment>(initial?.segment ?? "all");
   const [parentId, setParentId] = useState<string>(initial?.parentId ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
-  const [imageUrl, setImageUrl] = useState(initial?.imageUrl ?? "");
+  const [imagePreview, setImagePreview] = useState<string>(initial?.imageUrl ?? "");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   const [status, setStatus] = useState<CategoryStatus>(initial?.status ?? "active");
   const [order, setOrder] = useState<number>(initial?.order ?? 0);
@@ -711,6 +704,8 @@ function CategoryFormDialog({
   const [seoDescription, setSeoDescription] = useState(initial?.seoDescription ?? "");
   const [seoKeywords, setSeoKeywords] = useState(initial?.seoKeywords ?? "");
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (!open) return;
 
@@ -719,7 +714,8 @@ function CategoryFormDialog({
     setSegment(initial?.segment ?? "all");
     setParentId(initial?.parentId ?? "");
     setDescription(initial?.description ?? "");
-    setImageUrl(initial?.imageUrl ?? "");
+    setImagePreview(initial?.imageUrl ?? "");
+    setImageFile(null);
 
     setStatus(initial?.status ?? "active");
     setOrder(initial?.order ?? 0);
@@ -732,13 +728,48 @@ function CategoryFormDialog({
     setSeoTitle(initial?.seoTitle ?? "");
     setSeoDescription(initial?.seoDescription ?? "");
     setSeoKeywords(initial?.seoKeywords ?? "");
-  }, [open, initial?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, initial?.id]);
 
   useEffect(() => {
     if (!open) return;
     if (initial?.id) return;
     setSlug(slugify(name));
   }, [name, open, initial?.id]);
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+    if (!allowedTypes.includes(file.type)) {
+      toast({ title: "Invalid file type", description: "Please upload JPEG, PNG, WEBP, or GIF images only.", variant: "destructive" });
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ title: "File too large", description: "Maximum file size is 5MB.", variant: "destructive" });
+      return;
+    }
+
+    setImageFile(file);
+    
+    // Create preview
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setImagePreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeImage = () => {
+    setImageFile(null);
+    setImagePreview("");
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
 
   const submit = async () => {
     if (!name.trim() || name.trim().length < 2) {
@@ -751,33 +782,45 @@ function CategoryFormDialog({
       return;
     }
 
-    const payload: CategoryFormPayload = {
-      name: name.trim(),
-      slug: cleanSlug,
-      segment,
-      parentId: parentId ? parentId : null,
-      description: description.trim() || undefined,
-      imageUrl: imageUrl.trim() || undefined,
+    setUploading(true);
 
-      status,
-      order: Number(order) || 0,
+    try {
+      // Create FormData for multipart upload
+      const formData = new FormData();
+      formData.append("name", name.trim());
+      formData.append("slug", cleanSlug);
+      formData.append("segment", segment);
+      if (parentId) formData.append("parentId", parentId);
+      if (description.trim()) formData.append("description", description.trim());
+      formData.append("status", status);
+      formData.append("order", String(order));
+      formData.append("showOnWebsite", String(showOnWebsite));
+      formData.append("showInNavbar", String(showInNavbar));
+      formData.append("featured", String(featured));
+      formData.append("allowProducts", String(allowProducts));
+      if (seoTitle.trim()) formData.append("seoTitle", seoTitle.trim());
+      if (seoDescription.trim()) formData.append("seoDescription", seoDescription.trim());
+      if (seoKeywords.trim()) formData.append("seoKeywords", seoKeywords.trim());
+      
+      // Add image file if present
+      if (imageFile) {
+        formData.append("image", imageFile);
+      } else if (initial?.imageUrl && !imageFile && imagePreview === "") {
+        // If image was removed, send empty string to delete it
+        formData.append("imageUrl", "");
+      }
 
-      showOnWebsite,
-      showInNavbar,
-      featured,
-      allowProducts,
-
-      seoTitle: seoTitle.trim() || undefined,
-      seoDescription: seoDescription.trim() || undefined,
-      seoKeywords: seoKeywords.trim() || undefined,
-    };
-
-    await onSave(payload);
+      await onSave(formData);
+    } catch (error) {
+      console.error("Submit error:", error);
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
@@ -839,6 +882,49 @@ function CategoryFormDialog({
               />
             </div>
 
+            {/* Image Upload Section */}
+            <div>
+              <Label>Category Image</Label>
+              <div className="mt-2">
+                {imagePreview ? (
+                  <div className="relative inline-block">
+                    <img
+                      src={imagePreview}
+                      alt="Category preview"
+                      className="h-32 w-32 rounded-md object-cover border"
+                    />
+                    <button
+                      type="button"
+                      onClick={removeImage}
+                      className="absolute -top-2 -right-2 p-1 bg-destructive text-destructive-foreground rounded-full hover:bg-destructive/90"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <div
+                    className="border-2 border-dashed rounded-md p-6 text-center cursor-pointer hover:border-primary transition-colors"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                    <p className="text-sm text-muted-foreground">
+                      Click to upload or drag and drop
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      JPEG, PNG, WEBP, GIF up to 5MB
+                    </p>
+                  </div>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  onChange={handleImageSelect}
+                  className="hidden"
+                />
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Status</Label>
@@ -858,13 +944,6 @@ function CategoryFormDialog({
                 <Label>Display Order</Label>
                 <Input type="number" value={order} onChange={(e) => setOrder(Number(e.target.value))} />
               </div>
-            </div>
-
-            <div>
-              <Label className="flex items-center gap-2">
-                <ImageIcon className="h-4 w-4" /> Category Image URL
-              </Label>
-              <Input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://..." />
             </div>
           </div>
 
@@ -916,7 +995,10 @@ function CategoryFormDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={submit}>{initial ? "Save Changes" : "Create Category"}</Button>
+          <Button onClick={submit} disabled={uploading}>
+            {uploading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            {initial ? "Save Changes" : "Create Category"}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

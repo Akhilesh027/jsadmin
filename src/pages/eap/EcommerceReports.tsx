@@ -22,44 +22,102 @@ import {
   Search,
   CalendarDays,
   Loader2,
+  Eye,
+  MapPin,
+  Receipt,
+  CreditCard,
+  FileSpreadsheet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import * as XLSX from "xlsx";
 
 /** ---------------------------
- * Segments
+ * Types
  * -------------------------- */
 type Segment = "all" | "affordable" | "midrange" | "luxury";
-
-/** ---------------------------
- * Days filter
- * -------------------------- */
 type Days = "all" | "7" | "30" | "90";
 
-/** ---------------------------
- * Order shape (flexible)
- * -------------------------- */
-type AnyOrder = {
+type OrderItem = {
+  productId?: string;
+  quantity?: number;
+  price?: number;
+  finalPrice?: number;
+  productSnapshot?: {
+    name?: string;
+    price?: number;
+    sku?: string;
+    image?: string;
+    images?: string[];
+    gallery?: string[];
+  };
+  name?: string;
+};
+
+type OrderPricing = {
+  subtotal?: number;
+  discount?: number;
+  shipping?: number;
+  tax?: number;
+  total?: number;
+  coupon?: {
+    code?: string;
+  };
+};
+
+type OrderPayment = {
+  method?: string;
+  status?: string;
+  transactionId?: string;
+  meta?: {
+    upiId?: string;
+    bank?: string;
+    cardLast4?: string;
+  };
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
+};
+
+type OrderAddress = {
+  line1?: string;
+  line2?: string;
+  landmark?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  country?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  fullName?: string;
+  phone?: string;
+  email?: string;
+};
+
+type FullOrder = {
   _id?: string;
   id?: string;
-
-  website?: Segment; // injected by frontend
-  segment?: Segment; // if backend sends
-
+  orderNumber?: string;
+  website?: Segment;
+  segment?: Segment;
   status?: string;
-
-  totals?: { grandTotal?: number; total?: number };
-  totalAmount?: number;
-  grandTotal?: number;
-  total?: number;
-
   createdAt?: string;
   updatedAt?: string;
+  items?: OrderItem[];
+  pricing?: OrderPricing;
+  totals?: OrderPricing;
+  payment?: OrderPayment;
+  addressSnapshot?: OrderAddress;
+  shippingAddress?: OrderAddress;
+  addressDetails?: OrderAddress;
+  userDetails?: {
+    name?: string;
+    email?: string;
+    phone?: string;
+  };
 };
 
 const API = import.meta.env.VITE_API_URL || "https://api.jsgallor.com";
 const API_ROOT = `${API}/api/admin`;
 
-/** Your segment order endpoints */
 const SEGMENT_API: Record<Exclude<Segment, "all">, string> = {
   affordable: `${API_ROOT}/affordable/orders`,
   midrange: `${API_ROOT}/midrange/orders`,
@@ -67,7 +125,6 @@ const SEGMENT_API: Record<Exclude<Segment, "all">, string> = {
 };
 
 function getToken() {
-  // you used "Admintoken"
   return localStorage.getItem("Admintoken") || localStorage.getItem("token");
 }
 
@@ -85,8 +142,7 @@ async function apiGet(url: string) {
   return data;
 }
 
-function extractOrders(payload: any): AnyOrder[] {
-  // supports: [] OR {orders: []} OR {data: []} OR {success:true,data:[]} OR {success:true,orders:[]}
+function extractOrders(payload: any): FullOrder[] {
   if (Array.isArray(payload)) return payload;
   if (Array.isArray(payload?.orders)) return payload.orders;
   if (Array.isArray(payload?.data)) return payload.data;
@@ -97,8 +153,6 @@ function extractOrders(payload: any): AnyOrder[] {
 
 function normStatus(s?: string) {
   const x = String(s || "").toLowerCase().trim();
-
-  // normalize common variants
   if (x === "delivered") return "delivered";
   if (x === "out_for_delivery" || x === "out for delivery") return "out_for_delivery";
   if (x === "in_transit" || x === "in-transit" || x.includes("transit")) return "in_transit";
@@ -107,26 +161,353 @@ function normStatus(s?: string) {
   if (x === "placed") return "placed";
   if (x === "pending") return "pending";
   if (x === "cancelled" || x === "canceled") return "cancelled";
-
   return x || "unknown";
 }
 
-function getAmount(o: AnyOrder) {
-  return Number(
-    o?.totals?.grandTotal ??
-      o?.totals?.total ??
-      o?.grandTotal ??
-      o?.totalAmount ??
-      o?.total ??
-      0
-  );
+function getAmount(o: FullOrder) {
+  const pricing = o.pricing || o.totals || {};
+  return Number(pricing.total ?? pricing.grandTotal ?? 0);
+}
+
+function getSubtotal(o: FullOrder) {
+  const pricing = o.pricing || o.totals || {};
+  return Number(pricing.subtotal ?? 0);
+}
+
+function getDiscount(o: FullOrder) {
+  const pricing = o.pricing || o.totals || {};
+  return Number(pricing.discount ?? 0);
+}
+
+function getShipping(o: FullOrder) {
+  const pricing = o.pricing || o.totals || {};
+  return Number(pricing.shipping ?? 0);
+}
+
+function getTax(o: FullOrder) {
+  const pricing = o.pricing || o.totals || {};
+  return Number(pricing.tax ?? 0);
 }
 
 const fmtCurrency = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 const fmtNumber = (n: number) => Number(n || 0).toLocaleString("en-IN");
+const formatDateTime = (iso?: string) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleString("en-IN");
+};
+
+/** Helper to get full address string */
+function getFullAddress(addr: OrderAddress | undefined) {
+  if (!addr) return "";
+  const parts = [
+    addr.addressLine1 || addr.line1,
+    addr.addressLine2 || addr.line2,
+    addr.landmark ? `Landmark: ${addr.landmark}` : "",
+    `${addr.city || ""}${addr.city ? "," : ""} ${addr.state || ""}`.trim(),
+    addr.pincode ? `PIN: ${addr.pincode}` : "",
+    addr.country ? `Country: ${addr.country}` : "",
+  ];
+  return parts.filter(Boolean).join(", ");
+}
+
+/** Excel Export: Two sheets – Orders & Order Items */
+function exportOrdersToExcel(orders: FullOrder[]) {
+  if (!orders.length) {
+    toast({ title: "No data", description: "There are no orders to export.", variant: "destructive" });
+    return;
+  }
+
+  // Sheet 1: Orders
+  const ordersSheetData = orders.map((o) => {
+    const addr = o.addressSnapshot || o.shippingAddress || o.addressDetails || {};
+    const pricing = o.pricing || o.totals || {};
+    const payment = o.payment || {};
+
+    return {
+      "Order ID": o.orderNumber || o._id || o.id || "",
+      "Website": o.website || o.segment || "",
+      "Status": normStatus(o.status),
+      "Created At": formatDateTime(o.createdAt),
+      "Customer Name": o.userDetails?.name || addr.fullName || "",
+      "Customer Email": o.userDetails?.email || addr.email || "",
+      "Customer Phone": o.userDetails?.phone || addr.phone || "",
+      "Shipping Address": getFullAddress(addr),
+      "Subtotal": pricing.subtotal ?? 0,
+      "Discount": pricing.discount ?? 0,
+      "Shipping": pricing.shipping ?? 0,
+      "Tax": pricing.tax ?? 0,
+      "Total": pricing.total ?? 0,
+      "Payment Method": payment.method || "",
+      "Payment Status": payment.status || "",
+      "Transaction ID": payment.transactionId || "",
+      "UPI ID": payment.meta?.upiId || "",
+      "Card Last4": payment.meta?.cardLast4 || "",
+      "Razorpay Order ID": payment.razorpayOrderId || "",
+      "Razorpay Payment ID": payment.razorpayPaymentId || "",
+      "Coupon Code": pricing.coupon?.code || "",
+    };
+  });
+
+  // Sheet 2: Order Items
+  const itemsSheetData: any[] = [];
+  orders.forEach((o) => {
+    const orderId = o.orderNumber || o._id || o.id || "";
+    const items = o.items || [];
+    items.forEach((it, idx) => {
+      const name = it.name || it.productSnapshot?.name || "Item";
+      const qty = Number(it.quantity || 0);
+      const price = Number(it.finalPrice ?? it.price ?? it.productSnapshot?.price ?? 0);
+      const lineTotal = price * qty;
+      itemsSheetData.push({
+        "Order ID": orderId,
+        "Item #": idx + 1,
+        "Product Name": name,
+        "SKU": it.productSnapshot?.sku || "",
+        "Quantity": qty,
+        "Unit Price": price,
+        "Line Total": lineTotal,
+        "Product ID": it.productId || "",
+      });
+    });
+  });
+
+  const wb = XLSX.utils.book_new();
+
+  const ordersSheet = XLSX.utils.json_to_sheet(ordersSheetData);
+  XLSX.utils.book_append_sheet(wb, ordersSheet, "Orders");
+
+  if (itemsSheetData.length) {
+    const itemsSheet = XLSX.utils.json_to_sheet(itemsSheetData);
+    XLSX.utils.book_append_sheet(wb, itemsSheet, "Order Items");
+  }
+
+  const fileName = `orders_report_${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+
+  toast({ title: "Export completed", description: "Orders exported to Excel." });
+}
 
 /** ---------------------------
- * Page
+ * Modal Component
+ * -------------------------- */
+function OrderDetailsModal({
+  open,
+  order,
+  onClose,
+}: {
+  open: boolean;
+  order: FullOrder | null;
+  onClose: () => void;
+}) {
+  if (!open || !order) return null;
+
+  const orderId = order.orderNumber || order._id || order.id || "—";
+  const website = order.website || order.segment || "—";
+  const status = normStatus(order.status);
+  const createdAt = formatDateTime(order.createdAt);
+
+  // Address
+  const addr = order.addressSnapshot || order.shippingAddress || order.addressDetails || {};
+  const addressText = getFullAddress(addr);
+
+  const customerName =
+    order.userDetails?.name ||
+    addr.fullName ||
+    "Customer";
+  const customerEmail = order.userDetails?.email || addr.email || "";
+  const customerPhone = order.userDetails?.phone || addr.phone || "";
+
+  // Items
+  const items = order.items || [];
+  const pricing = order.pricing || order.totals || {};
+  const payment = order.payment || {};
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative w-[95vw] sm:w-[90vw] lg:w-[1000px] max-w-[95vw] h-[85vh] rounded-xl bg-background shadow-lg overflow-hidden">
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <h2 className="text-lg font-semibold">Order Details</h2>
+          <Button variant="outline" size="sm" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+
+        <div className="h-[calc(85vh-72px)] overflow-y-auto px-5 py-4">
+          <div className="space-y-6">
+            {/* Header */}
+            <div className="flex flex-wrap justify-between gap-4">
+              <div>
+                <div className="text-xl font-bold">{orderId}</div>
+                <div className="text-sm text-muted-foreground mt-1">
+                  <Badge variant="outline" className="capitalize">{website}</Badge>
+                  <Badge variant="secondary" className="ml-2 capitalize">{status.replaceAll("_", " ")}</Badge>
+                </div>
+                <div className="text-xs text-muted-foreground mt-2">Created: {createdAt}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-2xl font-bold">{fmtCurrency(getAmount(order))}</div>
+                <div className="text-xs text-muted-foreground">Total</div>
+              </div>
+            </div>
+
+            {/* Customer & Address */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="border rounded-lg p-3">
+                <div className="flex items-center gap-2 font-semibold mb-2">
+                  <MapPin className="h-4 w-4" />
+                  Billed To
+                </div>
+                <div className="font-medium">{customerName}</div>
+                {customerEmail && <div className="text-sm text-muted-foreground">{customerEmail}</div>}
+                {customerPhone && <div className="text-sm text-muted-foreground">{customerPhone}</div>}
+              </div>
+              <div className="border rounded-lg p-3">
+                <div className="flex items-center gap-2 font-semibold mb-2">
+                  <MapPin className="h-4 w-4" />
+                  Shipping Address
+                </div>
+                <div className="text-sm">{addressText || "—"}</div>
+              </div>
+            </div>
+
+            {/* Items Table */}
+            <div className="border rounded-lg overflow-hidden">
+              <div className="bg-muted/40 px-4 py-2 font-semibold">Order Items</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/20">
+                    <tr>
+                      <th className="p-3 text-left">#</th>
+                      <th className="p-3 text-left">Product</th>
+                      <th className="p-3 text-right">Qty</th>
+                      <th className="p-3 text-right">Price</th>
+                      <th className="p-3 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="p-3 text-center text-muted-foreground">
+                          No items
+                        </td>
+                      </tr>
+                    ) : (
+                      items.map((it, idx) => {
+                        const name = it.name || it.productSnapshot?.name || "Item";
+                        const qty = Number(it.quantity || 0);
+                        const price = Number(it.finalPrice ?? it.price ?? it.productSnapshot?.price ?? 0);
+                        const line = price * qty;
+                        const sku = it.productSnapshot?.sku || "";
+                        return (
+                          <tr key={idx} className="border-t">
+                            <td className="p-3">{idx + 1}</td>
+                            <td className="p-3">
+                              <div className="font-medium">{name}</div>
+                              {sku && <div className="text-xs text-muted-foreground">SKU: {sku}</div>}
+                            </td>
+                            <td className="p-3 text-right">{qty}</td>
+                            <td className="p-3 text-right">{fmtCurrency(price)}</td>
+                            <td className="p-3 text-right font-medium">{fmtCurrency(line)}</td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Pricing & Payment */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="border rounded-lg p-3">
+                <div className="font-semibold mb-2">Summary</div>
+                <div className="space-y-1 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Subtotal</span>
+                    <span>{fmtCurrency(getSubtotal(order))}</span>
+                  </div>
+                  {getDiscount(order) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Discount</span>
+                      <span className="text-green-600">-{fmtCurrency(getDiscount(order))}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Shipping</span>
+                    <span>{fmtCurrency(getShipping(order))}</span>
+                  </div>
+                  {getTax(order) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Tax</span>
+                      <span>{fmtCurrency(getTax(order))}</span>
+                    </div>
+                  )}
+                  {pricing.coupon?.code && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Coupon</span>
+                      <span className="font-mono text-xs">{pricing.coupon.code}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between font-semibold pt-2 border-t">
+                    <span>Total</span>
+                    <span>{fmtCurrency(getAmount(order))}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border rounded-lg p-3">
+                <div className="flex items-center gap-2 font-semibold mb-2">
+                  <CreditCard className="h-4 w-4" />
+                  Payment
+                </div>
+                <div className="space-y-1 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Method</span>
+                    <span className="capitalize">{payment.method || "—"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Status</span>
+                    <span className="capitalize">{payment.status || "—"}</span>
+                  </div>
+                  {payment.transactionId && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Transaction ID</span>
+                      <span className="font-mono text-xs">{payment.transactionId}</span>
+                    </div>
+                  )}
+                  {payment.meta?.upiId && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">UPI ID</span>
+                      <span className="font-mono text-xs">{payment.meta.upiId}</span>
+                    </div>
+                  )}
+                  {payment.meta?.cardLast4 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Card</span>
+                      <span>**** {payment.meta.cardLast4}</span>
+                    </div>
+                  )}
+                  {payment.razorpayOrderId && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Razorpay Order</span>
+                      <span className="font-mono text-xs">{payment.razorpayOrderId}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** ---------------------------
+ * Main Component
  * -------------------------- */
 export default function EcommerceReports() {
   const [segment, setSegment] = useState<Segment>("all");
@@ -134,13 +515,14 @@ export default function EcommerceReports() {
   const [q, setQ] = useState("");
 
   const [loading, setLoading] = useState(false);
-  const [orders, setOrders] = useState<AnyOrder[]>([]);
+  const [orders, setOrders] = useState<FullOrder[]>([]);
+  const [selectedOrder, setSelectedOrder] = useState<FullOrder | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
 
   const rangeLabel =
-    days === "all" ? "All Time (API)" : `Last ${days} days (API)`; // your backend may ignore this for now
+    days === "all" ? "All Time (API)" : `Last ${days} days (API)`;
 
   const withDays = (url: string) => {
-    // If your backend supports ?days=30 it will work; if not, backend should ignore unknown query.
     if (days === "all") return url;
     return `${url}${url.includes("?") ? "&" : "?"}days=${days}`;
   };
@@ -148,7 +530,7 @@ export default function EcommerceReports() {
   const fetchOrders = useCallback(async () => {
     setLoading(true);
     try {
-      let merged: AnyOrder[] = [];
+      let merged: FullOrder[] = [];
 
       if (segment === "all") {
         const [a, m, l] = await Promise.all([
@@ -167,7 +549,7 @@ export default function EcommerceReports() {
         merged = extractOrders(payload).map((x) => ({ ...x, website: segment }));
       }
 
-      // Sort latest first (nice UX)
+      // Sort latest first
       merged.sort((a, b) => {
         const da = new Date(a.createdAt || a.updatedAt || 0).getTime();
         const db = new Date(b.createdAt || b.updatedAt || 0).getTime();
@@ -236,32 +618,20 @@ export default function EcommerceReports() {
     return { totalOrders, totalRevenue, byStatus, bySite };
   }, [filtered]);
 
-  const exportCSV = () => {
-    const headers = ["id", "website", "status", "amount", "createdAt"];
-    const rows = filtered.map((o) => {
-      const id = o._id || o.id || "";
-      const site = o.website || o.segment || "";
-      const status = normStatus(o.status);
-      const amount = getAmount(o);
-      const createdAt = o.createdAt || "";
-      return [id, site, status, amount, createdAt]
-        .map((v) => `"${String(v).replace(/"/g, '""')}"`)
-        .join(",");
-    });
-
-    const csv = [headers.join(","), ...rows].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `eap-report-${segment}-${days}-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-
-    toast({ title: "Exported", description: "Report exported as CSV." });
+  const handleExport = () => {
+    if (filtered.length === 0) {
+      toast({ title: "No data", description: "There are no orders to export.", variant: "destructive" });
+      return;
+    }
+    exportOrdersToExcel(filtered);
   };
 
   const hasOrders = filtered.length > 0;
+
+  const openOrderModal = (order: FullOrder) => {
+    setSelectedOrder(order);
+    setModalOpen(true);
+  };
 
   return (
     <AdminLayout panelType="eap">
@@ -283,9 +653,9 @@ export default function EcommerceReports() {
           </div>
 
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={exportCSV} disabled={loading || !hasOrders}>
-              <Download className="h-4 w-4 mr-2" />
-              Export CSV
+            <Button variant="outline" onClick={handleExport} disabled={loading || !hasOrders}>
+              <FileSpreadsheet className="h-4 w-4 mr-2" />
+              Export Excel
             </Button>
           </div>
         </div>
@@ -348,7 +718,6 @@ export default function EcommerceReports() {
           <Card>
             <CardContent className="p-4 space-y-2">
               <div className="font-semibold">Orders by Status</div>
-
               {!hasOrders ? (
                 <div className="text-sm text-muted-foreground">No orders found.</div>
               ) : (
@@ -367,7 +736,6 @@ export default function EcommerceReports() {
           <Card>
             <CardContent className="p-4 space-y-2">
               <div className="font-semibold">Orders by Website</div>
-
               {!hasOrders ? (
                 <div className="text-sm text-muted-foreground">No orders found.</div>
               ) : (
@@ -384,7 +752,7 @@ export default function EcommerceReports() {
           </Card>
         </div>
 
-        {/* Simple Table */}
+        {/* Orders Table with View Button */}
         <Card>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
@@ -395,18 +763,19 @@ export default function EcommerceReports() {
                     <Th>Website</Th>
                     <Th>Status</Th>
                     <Th className="text-right">Amount</Th>
+                    <Th className="text-center">Actions</Th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={4} className="p-6 text-center text-muted-foreground">
+                      <td colSpan={5} className="p-6 text-center text-muted-foreground">
                         Loading...
                       </td>
                     </tr>
                   ) : filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="p-6 text-center text-muted-foreground">
+                      <td colSpan={5} className="p-6 text-center text-muted-foreground">
                         No orders found.
                       </td>
                     </tr>
@@ -417,6 +786,16 @@ export default function EcommerceReports() {
                         <Td className="capitalize">{String(o.website || o.segment || "—")}</Td>
                         <Td className="capitalize">{normStatus(o.status).replaceAll("_", " ")}</Td>
                         <Td className="text-right">{fmtCurrency(getAmount(o))}</Td>
+                        <Td className="text-center">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => openOrderModal(o)}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </Td>
                       </tr>
                     ))
                   )}
@@ -425,18 +804,28 @@ export default function EcommerceReports() {
 
               {filtered.length > 50 ? (
                 <div className="p-3 text-xs text-muted-foreground border-t">
-                  Showing first 50 rows (export CSV to get full data).
+                  Showing first 50 rows (export Excel to get full data).
                 </div>
               ) : null}
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* Modal */}
+      <OrderDetailsModal
+        open={modalOpen}
+        order={selectedOrder}
+        onClose={() => {
+          setModalOpen(false);
+          setSelectedOrder(null);
+        }}
+      />
     </AdminLayout>
   );
 }
 
-/** UI */
+/** UI Components */
 function Kpi({ title, value, icon: Icon }: { title: string; value: string; icon: any }) {
   return (
     <Card>

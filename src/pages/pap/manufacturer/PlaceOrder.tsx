@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "@/hooks/use-toast";
-import { Calendar, Loader2 } from "lucide-react";
+import { Calendar, Loader2, Plus, Trash2 } from "lucide-react";
 
 const API_BASE = "https://api.jsgallor.com";
 
@@ -24,12 +24,24 @@ type Manufacturer = {
   country?: string;
 };
 
-type PurchaseOrder = {
+type Product = {
   _id: string;
-  manufacturer: Manufacturer | string;
+  name: string;
+  sku?: string;
+  price?: number;
+};
+
+type LineItem = {
+  productId: string;
   productName: string;
   sku?: string;
   quantity: number;
+};
+
+type PurchaseOrder = {
+  _id: string;
+  manufacturer: Manufacturer | string;
+  items: LineItem[];
   address: string;
   expectedDate: string;
   paymentOption: "advance" | "partial" | "credit" | "delivery";
@@ -40,17 +52,20 @@ type PurchaseOrder = {
 
 export default function PlaceOrder() {
   const [loadingMfg, setLoadingMfg] = useState(false);
+  const [loadingProducts, setLoadingProducts] = useState(false);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const [manufacturers, setManufacturers] = useState<Manufacturer[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
 
+  const [selectedManufacturerId, setSelectedManufacturerId] = useState("");
+  const [lineItems, setLineItems] = useState<LineItem[]>([]);
+  const [selectedProductId, setSelectedProductId] = useState("");
+  const [itemQuantity, setItemQuantity] = useState(1);
+
   const [formData, setFormData] = useState({
-    manufacturerId: "",
-    productName: "",
-    sku: "",
-    quantity: "",
     address: "",
     expectedDate: "",
     paymentOption: "",
@@ -65,7 +80,7 @@ export default function PlaceOrder() {
     }
   };
 
-  // ✅ fetch manufacturers (Verified)
+  // ✅ fetch manufacturers
   const fetchVerifiedManufacturers = async () => {
     try {
       setLoadingMfg(true);
@@ -85,6 +100,30 @@ export default function PlaceOrder() {
       });
     } finally {
       setLoadingMfg(false);
+    }
+  };
+
+  // ✅ fetch products for selected manufacturer - FIXED
+  const fetchProductsForManufacturer = async (manufacturerId: string) => {
+    try {
+      setLoadingProducts(true);
+      const res = await fetch(
+        `${API_BASE}/api/admin/manufacturers/products/${manufacturerId}`
+      );
+      const data = await safeJson(res);
+      if (!res.ok || !data?.success) throw new Error(data?.message || "Failed to load products");
+
+      // ✅ CORRECT: set products, NOT manufacturers
+      setProducts(Array.isArray(data.products) ? data.products : []);
+    } catch (err: any) {
+      toast({
+        title: "Error",
+        description: err.message || "Failed to load products",
+        variant: "destructive",
+      });
+      setProducts([]);
+    } finally {
+      setLoadingProducts(false);
     }
   };
 
@@ -119,26 +158,76 @@ export default function PlaceOrder() {
   }, []);
 
   useEffect(() => {
-    if (!formData.manufacturerId) {
+    if (!selectedManufacturerId) {
+      setProducts([]);
       setOrders([]);
+      setLineItems([]);
       return;
     }
-    fetchOrdersForManufacturer(formData.manufacturerId);
-  }, [formData.manufacturerId]);
+    fetchProductsForManufacturer(selectedManufacturerId);
+    fetchOrdersForManufacturer(selectedManufacturerId);
+  }, [selectedManufacturerId]);
+
+  // Add product to line items
+  const addProductToOrder = () => {
+    if (!selectedProductId) {
+      toast({ title: "Error", description: "Select a product", variant: "destructive" });
+      return;
+    }
+    if (itemQuantity < 1) {
+      toast({ title: "Error", description: "Quantity must be at least 1", variant: "destructive" });
+      return;
+    }
+
+    const product = products.find(p => p._id === selectedProductId);
+    if (!product) return;
+
+    // Check if product already added
+    const existingIndex = lineItems.findIndex(item => item.productId === selectedProductId);
+    if (existingIndex !== -1) {
+      // Update quantity
+      const newItems = [...lineItems];
+      newItems[existingIndex].quantity += itemQuantity;
+      setLineItems(newItems);
+    } else {
+      setLineItems([
+        ...lineItems,
+        {
+          productId: product._id,
+          productName: product.name,
+          sku: product.sku,
+          quantity: itemQuantity,
+        },
+      ]);
+    }
+
+    // Reset selection
+    setSelectedProductId("");
+    setItemQuantity(1);
+  };
+
+  const removeLineItem = (index: number) => {
+    setLineItems(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const updateLineItemQuantity = (index: number, newQuantity: number) => {
+    if (newQuantity < 1) {
+      removeLineItem(index);
+      return;
+    }
+    const newItems = [...lineItems];
+    newItems[index].quantity = newQuantity;
+    setLineItems(newItems);
+  };
 
   const submitOrder = async (mode: "sent" | "draft") => {
-    if (!formData.manufacturerId) {
+    if (!selectedManufacturerId) {
       toast({ title: "Error", description: "Please select manufacturer", variant: "destructive" });
       return;
     }
 
-    if (!formData.productName.trim()) {
-      toast({ title: "Error", description: "Product name is required", variant: "destructive" });
-      return;
-    }
-
-    if (!formData.quantity || Number(formData.quantity) < 1) {
-      toast({ title: "Error", description: "Quantity must be at least 1", variant: "destructive" });
+    if (lineItems.length === 0) {
+      toast({ title: "Error", description: "At least one product is required", variant: "destructive" });
       return;
     }
 
@@ -154,20 +243,25 @@ export default function PlaceOrder() {
     try {
       setSubmitting(true);
 
+      const payload = {
+        manufacturerId: selectedManufacturerId,
+        items: lineItems.map(item => ({
+          productId: item.productId,
+          productName: item.productName,
+          sku: item.sku,
+          quantity: item.quantity,
+        })),
+        address: formData.address,
+        expectedDate: formData.expectedDate,
+        paymentOption: formData.paymentOption,
+        notes: formData.notes,
+        status: mode,
+      };
+
       const res = await fetch(`${API_BASE}/api/admin/orders`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          manufacturerId: formData.manufacturerId,
-          productName: formData.productName.trim(),
-          sku: formData.sku.trim() || undefined,
-          quantity: Number(formData.quantity),
-          address: formData.address,
-          expectedDate: formData.expectedDate,
-          paymentOption: formData.paymentOption,
-          notes: formData.notes,
-          status: mode,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await safeJson(res);
@@ -181,21 +275,19 @@ export default function PlaceOrder() {
         description: mode === "draft" ? "Order saved as draft." : "Order sent to manufacturer.",
       });
 
-      // reset fields except manufacturer (optional)
-      const keepManufacturer = formData.manufacturerId;
+      // Reset form except manufacturer
+      setLineItems([]);
       setFormData({
-        manufacturerId: keepManufacturer,
-        productName: "",
-        sku: "",
-        quantity: "",
         address: "",
         expectedDate: "",
         paymentOption: "",
         notes: "",
       });
+      setSelectedProductId("");
+      setItemQuantity(1);
 
-      // ✅ refresh orders list
-      fetchOrdersForManufacturer(keepManufacturer);
+      // Refresh orders list
+      fetchOrdersForManufacturer(selectedManufacturerId);
     } catch (err: any) {
       toast({ title: "Error", description: err.message || "Failed to submit order", variant: "destructive" });
     } finally {
@@ -245,8 +337,8 @@ export default function PlaceOrder() {
               <div className="space-y-2">
                 <Label>Select Manufacturer</Label>
                 <Select
-                  value={formData.manufacturerId}
-                  onValueChange={(value) => setFormData({ ...formData, manufacturerId: value })}
+                  value={selectedManufacturerId}
+                  onValueChange={(value) => setSelectedManufacturerId(value)}
                   disabled={loadingMfg}
                 >
                   <SelectTrigger>
@@ -264,42 +356,84 @@ export default function PlaceOrder() {
                 </Select>
               </div>
 
-              {/* Product name + SKU */}
+              {/* Product selection */}
+              {selectedManufacturerId && (
+                <div className="space-y-2 border-t pt-4">
+                  <Label>Add Product</Label>
+                  <div className="flex gap-2">
+                    <Select
+                      value={selectedProductId}
+                      onValueChange={setSelectedProductId}
+                      disabled={loadingProducts}
+                    >
+                      <SelectTrigger className="flex-1">
+                        <SelectValue placeholder={loadingProducts ? "Loading products..." : "Select product"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {products.map((p) => (
+                          <SelectItem key={p._id} value={p._id}>
+                            {p.name} {p.sku ? `(${p.sku})` : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={itemQuantity}
+                      onChange={(e) => setItemQuantity(Math.max(1, Number(e.target.value)))}
+                      className="w-24"
+                    />
+                    <Button type="button" variant="outline" onClick={addProductToOrder}>
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
+
+                  {/* Line items table */}
+                  {lineItems.length > 0 && (
+                    <div className="mt-4 space-y-2">
+                      <Label>Order Items</Label>
+                      <div className="space-y-2">
+                        {lineItems.map((item, idx) => (
+                          <div key={idx} className="flex items-center gap-2 p-2 border rounded-lg">
+                            <div className="flex-1">
+                              <p className="font-medium">{item.productName}</p>
+                              {item.sku && <p className="text-xs text-muted-foreground">SKU: {item.sku}</p>}
+                            </div>
+                            <Input
+                              type="number"
+                              min={1}
+                              value={item.quantity}
+                              onChange={(e) => updateLineItemQuantity(idx, Number(e.target.value))}
+                              className="w-20"
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => removeLineItem(idx)}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Address + Expected Date */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Product Name *</Label>
-                  <Input
-                    placeholder="Enter product name"
-                    value={formData.productName}
-                    onChange={(e) => setFormData({ ...formData, productName: e.target.value })}
+                  <Label>Delivery Address</Label>
+                  <Textarea
+                    placeholder="Enter complete delivery address"
+                    value={formData.address}
+                    onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                     required
                   />
                 </div>
-
-                <div className="space-y-2">
-                  <Label>SKU (optional)</Label>
-                  <Input
-                    placeholder="SKU (optional)"
-                    value={formData.sku}
-                    onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              {/* Quantity + Date */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Quantity</Label>
-                  <Input
-                    type="number"
-                    min={1}
-                    placeholder="Enter quantity"
-                    value={formData.quantity}
-                    onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
-                    required
-                  />
-                </div>
-
                 <div className="space-y-2">
                   <Label>Expected Delivery Date</Label>
                   <div className="relative">
@@ -312,17 +446,6 @@ export default function PlaceOrder() {
                     <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
                   </div>
                 </div>
-              </div>
-
-              {/* Address */}
-              <div className="space-y-2">
-                <Label>Delivery Address</Label>
-                <Textarea
-                  placeholder="Enter complete delivery address"
-                  value={formData.address}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  required
-                />
               </div>
 
               {/* Payment */}
@@ -375,14 +498,14 @@ export default function PlaceOrder() {
           </CardContent>
         </Card>
 
-        {/* ✅ Orders list for selected manufacturer */}
+        {/* Orders list for selected manufacturer */}
         <Card>
           <CardHeader>
             <CardTitle>Orders</CardTitle>
           </CardHeader>
 
           <CardContent>
-            {!formData.manufacturerId ? (
+            {!selectedManufacturerId ? (
               <p className="text-sm text-muted-foreground">
                 Select a manufacturer to view orders.
               </p>
@@ -398,13 +521,12 @@ export default function PlaceOrder() {
                   <div key={o._id} className="rounded-lg border border-border p-3">
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <p className="font-semibold">{o.productName}</p>
-                        <p className="text-xs text-muted-foreground">
-                          Qty: {o.quantity} • Expected: {new Date(o.expectedDate).toLocaleDateString()}
+                        <p className="font-semibold">
+                          {o.items.length} item{o.items.length > 1 ? "s" : ""}
                         </p>
-                        {o.sku ? (
-                          <p className="text-xs text-muted-foreground">SKU: {o.sku}</p>
-                        ) : null}
+                        <p className="text-xs text-muted-foreground">
+                          Expected: {new Date(o.expectedDate).toLocaleDateString()}
+                        </p>
                       </div>
 
                       <span className={`px-2 py-1 text-xs rounded ${getStatusPill(o.status)}`}>

@@ -215,20 +215,7 @@ export default function ManufacturerDashboard() {
           </div>
         </Link>
 
-        <Link
-          to="/pap/manufacturer/forward"
-          className="stat-card hover:border-primary/50 border border-transparent"
-        >
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-success/10 flex items-center justify-center">
-              <TrendingUp className="h-5 w-5 text-success" />
-            </div>
-            <div>
-              <p className="font-medium">Forward Catalogs</p>
-              <p className="text-sm text-muted-foreground">To website / vendors</p>
-            </div>
-          </div>
-        </Link>
+        
       </div>
 
       {/* Recent Activity */}

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import { DataTable } from "@/components/ui/data-table";
-import { Eye, ShoppingBag, MapPin, Receipt } from "lucide-react";
+import { Eye, ShoppingBag, MapPin, Receipt, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import * as XLSX from "xlsx";
 
 type Segment = "all" | "affordable" | "midlevel" | "luxury";
 type BackendPlatform = "affordable" | "midrange" | "luxury";
@@ -149,7 +150,6 @@ function Modal({
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
 
-      {/* ✅ Responsive fixed size + scroll */}
       <div className="relative w-[95vw] sm:w-[90vw] lg:w-[950px] max-w-[95vw] h-[85vh] rounded-xl bg-background shadow-lg overflow-hidden">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <h2 className="text-lg font-semibold">{title}</h2>
@@ -166,6 +166,209 @@ function Modal({
   );
 }
 
+/** Excel export utilities */
+function exportCustomersToExcel(customers: CustomerRow[]) {
+  if (!customers.length) {
+    toast({
+      title: "No data",
+      description: "There are no customers to export.",
+    });
+    return;
+  }
+
+  // Prepare sheets
+  const customersSheetData = customers.map((c) => ({
+    "Customer ID": c.id,
+    Name: getCustomerName(c),
+    Email: c.email,
+    Phone: c.phone || "",
+    Platform: platformLabel(c.platform),
+    Role: c.role || "",
+    "Total Orders": c.totalOrders,
+    "Total Spent": c.totalSpent,
+    "Last Order Date": formatDateTime(c.lastOrderDate),
+    "Created At": formatDateTime(c.createdAt),
+    "Last Login": formatDateTime(c.lastLogin),
+  }));
+
+  const addressesSheetData: any[] = [];
+  customers.forEach((c) => {
+    c.addressesDetailed.forEach((a) => {
+      addressesSheetData.push({
+        "Customer ID": c.id,
+        "Address ID": a._id,
+        "Full Name": a.fullName || "",
+        Phone: a.phone || "",
+        Email: a.email || "",
+        "Address Line 1": a.addressLine1 || "",
+        "Address Line 2": a.addressLine2 || "",
+        City: a.city || "",
+        State: a.state || "",
+        Pincode: a.pincode || "",
+        Landmark: a.landmark || "",
+        "Is Default": a.isDefault ? "Yes" : "No",
+        "Created At": formatDateTime(a.createdAt),
+      });
+    });
+  });
+
+  const ordersSheetData: any[] = [];
+  const orderItemsSheetData: any[] = [];
+
+  customers.forEach((c) => {
+    c.ordersDetailed.forEach((order) => {
+      ordersSheetData.push({
+        "Order ID": order._id,
+        "Customer ID": c.id,
+        "Address ID": order.addressId,
+        "Order Date": formatDateTime(order.createdAt),
+        Status: order.status || "",
+        "Payment Method": order.payment?.method || "",
+        "Payment Status": order.payment?.status || "",
+        Subtotal: order.pricing?.subtotal || 0,
+        Discount: order.pricing?.discount || 0,
+        "Shipping Cost": order.pricing?.shippingCost || 0,
+        Total: order.pricing?.total || 0,
+      });
+
+      order.items.forEach((item) => {
+        orderItemsSheetData.push({
+          "Order ID": order._id,
+          "Customer ID": c.id,
+          "Product ID": item.productId,
+          "Product Name": item.productSnapshot?.name || "",
+          Quantity: item.quantity,
+          Price: item.productSnapshot?.price || 0,
+          Category: item.productSnapshot?.category || "",
+          Color: (item.productSnapshot?.colors || []).join(", "),
+          "In Stock": item.productSnapshot?.inStock ? "Yes" : "No",
+        });
+      });
+    });
+  });
+
+  const wb = XLSX.utils.book_new();
+
+  const customersSheet = XLSX.utils.json_to_sheet(customersSheetData);
+  XLSX.utils.book_append_sheet(wb, customersSheet, "Customers");
+
+  if (addressesSheetData.length) {
+    const addressesSheet = XLSX.utils.json_to_sheet(addressesSheetData);
+    XLSX.utils.book_append_sheet(wb, addressesSheet, "Addresses");
+  }
+
+  if (ordersSheetData.length) {
+    const ordersSheet = XLSX.utils.json_to_sheet(ordersSheetData);
+    XLSX.utils.book_append_sheet(wb, ordersSheet, "Orders");
+  }
+
+  if (orderItemsSheetData.length) {
+    const orderItemsSheet = XLSX.utils.json_to_sheet(orderItemsSheetData);
+    XLSX.utils.book_append_sheet(wb, orderItemsSheet, "Order Items");
+  }
+
+  XLSX.writeFile(wb, `customers_${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.xlsx`);
+
+  toast({
+    title: "Export completed",
+    description: "Customer data has been exported to Excel.",
+  });
+}
+
+function exportSingleCustomerToExcel(customer: CustomerRow) {
+  const customersSheetData = [
+    {
+      "Customer ID": customer.id,
+      Name: getCustomerName(customer),
+      Email: customer.email,
+      Phone: customer.phone || "",
+      Platform: platformLabel(customer.platform),
+      Role: customer.role || "",
+      "Total Orders": customer.totalOrders,
+      "Total Spent": customer.totalSpent,
+      "Last Order Date": formatDateTime(customer.lastOrderDate),
+      "Created At": formatDateTime(customer.createdAt),
+      "Last Login": formatDateTime(customer.lastLogin),
+    },
+  ];
+
+  const addressesSheetData = customer.addressesDetailed.map((a) => ({
+    "Address ID": a._id,
+    "Full Name": a.fullName || "",
+    Phone: a.phone || "",
+    Email: a.email || "",
+    "Address Line 1": a.addressLine1 || "",
+    "Address Line 2": a.addressLine2 || "",
+    City: a.city || "",
+    State: a.state || "",
+    Pincode: a.pincode || "",
+    Landmark: a.landmark || "",
+    "Is Default": a.isDefault ? "Yes" : "No",
+    "Created At": formatDateTime(a.createdAt),
+  }));
+
+  const ordersSheetData: any[] = [];
+  const orderItemsSheetData: any[] = [];
+
+  customer.ordersDetailed.forEach((order) => {
+    ordersSheetData.push({
+      "Order ID": order._id,
+      "Address ID": order.addressId,
+      "Order Date": formatDateTime(order.createdAt),
+      Status: order.status || "",
+      "Payment Method": order.payment?.method || "",
+      "Payment Status": order.payment?.status || "",
+      Subtotal: order.pricing?.subtotal || 0,
+      Discount: order.pricing?.discount || 0,
+      "Shipping Cost": order.pricing?.shippingCost || 0,
+      Total: order.pricing?.total || 0,
+    });
+
+    order.items.forEach((item) => {
+      orderItemsSheetData.push({
+        "Order ID": order._id,
+        "Product ID": item.productId,
+        "Product Name": item.productSnapshot?.name || "",
+        Quantity: item.quantity,
+        Price: item.productSnapshot?.price || 0,
+        Category: item.productSnapshot?.category || "",
+        Color: (item.productSnapshot?.colors || []).join(", "),
+        "In Stock": item.productSnapshot?.inStock ? "Yes" : "No",
+      });
+    });
+  });
+
+  const wb = XLSX.utils.book_new();
+
+  const customersSheet = XLSX.utils.json_to_sheet(customersSheetData);
+  XLSX.utils.book_append_sheet(wb, customersSheet, "Customer");
+
+  if (addressesSheetData.length) {
+    const addressesSheet = XLSX.utils.json_to_sheet(addressesSheetData);
+    XLSX.utils.book_append_sheet(wb, addressesSheet, "Addresses");
+  }
+
+  if (ordersSheetData.length) {
+    const ordersSheet = XLSX.utils.json_to_sheet(ordersSheetData);
+    XLSX.utils.book_append_sheet(wb, ordersSheet, "Orders");
+  }
+
+  if (orderItemsSheetData.length) {
+    const orderItemsSheet = XLSX.utils.json_to_sheet(orderItemsSheetData);
+    XLSX.utils.book_append_sheet(wb, orderItemsSheet, "Order Items");
+  }
+
+  XLSX.writeFile(
+    wb,
+    `customer_${customer.id}_${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.xlsx`
+  );
+
+  toast({
+    title: "Export completed",
+    description: "Customer details have been exported to Excel.",
+  });
+}
+
 export default function CustomerList() {
   const [segment, setSegment] = useState<Segment>("all");
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
@@ -176,10 +379,15 @@ export default function CustomerList() {
   const [selected, setSelected] = useState<CustomerRow | null>(null);
 
   const handleDownload = () => {
-    toast({
-      title: "Download Started",
-      description: "Customer data is being downloaded.",
-    });
+    if (customers.length === 0) {
+      toast({
+        title: "No data",
+        description: "There are no customers to export.",
+        variant: "destructive",
+      });
+      return;
+    }
+    exportCustomersToExcel(customers);
   };
 
   useEffect(() => {
@@ -345,26 +553,38 @@ export default function CustomerList() {
           <div className="text-muted-foreground">No customer selected.</div>
         ) : (
           <div className="space-y-5">
-            {/* Header */}
-            <div className="flex items-start gap-4">
-              <div className="h-16 w-16 rounded-xl overflow-hidden border bg-muted shrink-0">
-                {selected.avatar ? (
-                  <img src={selected.avatar} alt={getCustomerName(selected)} className="h-full w-full object-cover" />
-                ) : null}
+            {/* Header with download button */}
+            <div className="flex items-start justify-between">
+              <div className="flex items-start gap-4">
+                <div className="h-16 w-16 rounded-xl overflow-hidden border bg-muted shrink-0">
+                  {selected.avatar ? (
+                    <img src={selected.avatar} alt={getCustomerName(selected)} className="h-full w-full object-cover" />
+                  ) : null}
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xl font-semibold truncate">{getCustomerName(selected)}</p>
+                    <Badge variant="secondary">{platformLabel(selected.platform)}</Badge>
+                    {selected.role ? <Badge variant="outline">Role: {selected.role}</Badge> : null}
+                  </div>
+                  <p className="text-sm text-muted-foreground break-all">{selected.email}</p>
+                  <p className="text-sm text-muted-foreground">{selected.phone || "—"}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Customer ID: <span className="font-mono">{selected.id}</span>
+                  </p>
+                </div>
               </div>
 
-              <div className="flex-1 min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-xl font-semibold truncate">{getCustomerName(selected)}</p>
-                  <Badge variant="secondary">{platformLabel(selected.platform)}</Badge>
-                  {selected.role ? <Badge variant="outline">Role: {selected.role}</Badge> : null}
-                </div>
-                <p className="text-sm text-muted-foreground break-all">{selected.email}</p>
-                <p className="text-sm text-muted-foreground">{selected.phone || "—"}</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Customer ID: <span className="font-mono">{selected.id}</span>
-                </p>
-              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => exportSingleCustomerToExcel(selected)}
+                className="shrink-0 ml-4"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Download
+              </Button>
             </div>
 
             {/* Quick stats */}

@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
-
+import logo from '../../../public/JSGALORE.png'
 interface NavItem {
   title: string;
   href?: string;
@@ -294,9 +294,9 @@ export function AdminSidebar({ panelType }: AdminSidebarProps) {
         {/* Logo */}
         <div className="flex-shrink-0 h-16 border-b border-sidebar-border px-6">
           <div className="flex h-full items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg gradient-gold">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg ">
               <span className="font-display text-lg font-bold text-sidebar-primary-foreground">
-                JG
+                <img src={logo} alt="logo" />
               </span>
             </div>
             <div>

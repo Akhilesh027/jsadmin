@@ -1,7 +1,7 @@
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import React, { useEffect, useMemo, useState } from "react";
 import { toast } from "@/hooks/use-toast";
-import { Download, FileText, Image as ImageIcon, X } from "lucide-react";
+import { Download, FileText, Image as ImageIcon, X, Eye } from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://api.jsgallor.com";
 
@@ -10,7 +10,6 @@ type Estimate = {
   floorplan: string;
   purpose: string;
   propertyType: string;
-  // Furniture items (kitchen & wardrobe removed)
   tvUnit: number;
   sofaSet: number;
   beds: number;
@@ -54,6 +53,110 @@ const AdminEstimates: React.FC = () => {
   const [totalAmount, setTotalAmount] = useState<number | "">("");
 
   const [downloadingAll, setDownloadingAll] = useState(false);
+  const [imageBlobs, setImageBlobs] = useState<Map<string, string>>(new Map());
+
+  // Fetch image blob with authentication
+const fetchImageBlob = async (url: string): Promise<string | null> => {
+  try {
+    let fullUrl = url;
+    if (url.startsWith('/')) {
+      if (import.meta.env.DEV) {
+        fullUrl = url;
+      } else {
+        fullUrl = `${API_BASE}${url}`;
+      }
+    }
+    const headers = getAuthHeaders();
+    const res = await fetch(fullUrl, { headers });
+    if (!res.ok) throw new Error(`Failed to load image: ${res.status}`);
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  } catch (err) {
+    console.error('Image load error:', err);
+    return null;
+  }
+};
+  // Load images for selected estimate
+  useEffect(() => {
+    if (!selected?.floorplanImageUrls?.length) return;
+    const loadImages = async () => {
+      const newBlobs = new Map();
+      for (const url of selected.floorplanImageUrls!) {
+        const blobUrl = await fetchImageBlob(url);
+        if (blobUrl) newBlobs.set(url, blobUrl);
+      }
+      setImageBlobs(newBlobs);
+    };
+    loadImages();
+    return () => {
+      // Cleanup blob URLs
+      imageBlobs.forEach((blobUrl) => URL.revokeObjectURL(blobUrl));
+    };
+  }, [selected?.floorplanImageUrls]);
+const downloadFile = async (url: string, filename: string, openInNewTab = false) => {
+  try {
+    // If URL is relative and we are in development, keep it relative (use proxy)
+    let fullUrl = url;
+    if (url.startsWith('/')) {
+      if (import.meta.env.DEV) {
+        fullUrl = url; // relative, will be proxied
+      } else {
+        fullUrl = `${API_BASE}${url}`;
+      }
+    }
+
+    // Determine if we should send auth headers (only for same origin or API origin)
+    let headers: HeadersInit = {};
+    try {
+      const parsed = new URL(fullUrl);
+      const currentOrigin = window.location.origin;
+      const apiOrigin = new URL(API_BASE).origin;
+      if (parsed.origin === currentOrigin || parsed.origin === apiOrigin) {
+        headers = getAuthHeaders();
+      }
+    } catch (e) {
+      console.warn('Invalid URL:', url);
+    }
+
+    const response = await fetch(fullUrl, { headers });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        toast({
+          title: "Cannot view/download",
+          description: "This file requires authentication. Please ensure you are logged in and try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+      throw new Error(`Failed to fetch file: ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+
+    if (openInNewTab) {
+      window.open(blobUrl, '_blank');
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+    } else {
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    }
+  } catch (err: any) {
+    console.error("File operation error:", err);
+    toast({
+      title: "Failed",
+      description: err?.message || "Could not process the file.",
+      variant: "destructive",
+    });
+  }
+};
+
 
   const getAuthHeaders = () => {
     const token = localStorage.getItem("token");
@@ -263,7 +366,6 @@ const AdminEstimates: React.FC = () => {
 
   useEffect(() => {
     fetchList();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const total = useMemo(() => list.length, [list]);
@@ -272,6 +374,11 @@ const AdminEstimates: React.FC = () => {
     setSelected(null);
     setEstimatedAmount("");
     setTotalAmount("");
+  };
+
+  const getExtension = (url: string) => {
+    const parts = url.split('.');
+    return parts.length > 1 ? parts.pop() : 'file';
   };
 
   return (
@@ -485,37 +592,75 @@ const AdminEstimates: React.FC = () => {
                         <h3 className="font-semibold mb-3">Uploaded Files</h3>
                         <div className="space-y-3">
                           {selected.planFileUrl && (
-                            <div className="flex items-start gap-2">
-                              <FileText className="h-4 w-4 text-blue-600 mt-0.5" />
-                              <div>
-                                <span className="font-medium">2D/3D Plan:</span>{" "}
-                                <a
-                                  href={selected.planFileUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-red-600 underline"
-                                >
-                                  View Plan
-                                </a>
+                            <div className="flex items-start gap-2 justify-between">
+                              <div className="flex items-start gap-2">
+                                <FileText className="h-4 w-4 text-blue-600 mt-0.5" />
+                                <div>
+                                  <span className="font-medium">2D/3D Plan:</span>{" "}
+                                  <button
+                                    onClick={() =>
+                                      downloadFile(
+                                        selected.planFileUrl!,
+                                        `plan_${selected._id}.${getExtension(selected.planFileUrl!)}`,
+                                        true
+                                      )
+                                    }
+                                    className="text-red-600 underline hover:text-red-800"
+                                  >
+                                    View Plan
+                                  </button>
+                                </div>
                               </div>
+                              <button
+                                onClick={() =>
+                                  downloadFile(
+                                    selected.planFileUrl!,
+                                    `plan_${selected._id}.${getExtension(selected.planFileUrl!)}`,
+                                    false
+                                  )
+                                }
+                                className="text-blue-600 hover:underline flex items-center gap-1 text-sm"
+                              >
+                                <Download className="h-4 w-4" /> Download
+                              </button>
                             </div>
                           )}
+
                           {selected.floorplanPdfUrl && (
-                            <div className="flex items-start gap-2">
-                              <FileText className="h-4 w-4 text-blue-600 mt-0.5" />
-                              <div>
-                                <span className="font-medium">Floorplan PDF:</span>{" "}
-                                <a
-                                  href={selected.floorplanPdfUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-red-600 underline"
-                                >
-                                  Open PDF
-                                </a>
+                            <div className="flex items-start gap-2 justify-between">
+                              <div className="flex items-start gap-2">
+                                <FileText className="h-4 w-4 text-blue-600 mt-0.5" />
+                                <div>
+                                  <span className="font-medium">Floorplan PDF:</span>{" "}
+                                  <button
+                                    onClick={() =>
+                                      downloadFile(
+                                        selected.floorplanPdfUrl!,
+                                        `floorplan_${selected._id}.pdf`,
+                                        true
+                                      )
+                                    }
+                                    className="text-red-600 underline hover:text-red-800"
+                                  >
+                                    Open PDF
+                                  </button>
+                                </div>
                               </div>
+                              <button
+                                onClick={() =>
+                                  downloadFile(
+                                    selected.floorplanPdfUrl!,
+                                    `floorplan_${selected._id}.pdf`,
+                                    false
+                                  )
+                                }
+                                className="text-blue-600 hover:underline flex items-center gap-1 text-sm"
+                              >
+                                <Download className="h-4 w-4" /> Download
+                              </button>
                             </div>
                           )}
+
                           {selected.floorplanImageUrls && selected.floorplanImageUrls.length > 0 && (
                             <div>
                               <div className="flex items-center gap-2 mb-2">
@@ -523,21 +668,57 @@ const AdminEstimates: React.FC = () => {
                                 <span className="font-medium">Floorplan Images:</span>
                               </div>
                               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                                {selected.floorplanImageUrls.map((url, idx) => (
-                                  <a key={idx} href={url} target="_blank" rel="noreferrer">
-                                    <img
-                                      src={url}
-                                      alt={`floorplan-${idx}`}
-                                      className="w-full h-24 object-cover rounded-lg border"
-                                    />
-                                  </a>
-                                ))}
+                                {selected.floorplanImageUrls.map((url, idx) => {
+                                  const blobUrl = imageBlobs.get(url);
+                                  return (
+                                    <div key={idx} className="relative group">
+                                      <button
+                                        onClick={() =>
+                                          downloadFile(
+                                            url,
+                                            `floorplan_image_${selected._id}_${idx + 1}.${getExtension(url)}`,
+                                            true
+                                          )
+                                        }
+                                        className="w-full h-24 object-cover rounded-lg border cursor-pointer hover:opacity-80 transition"
+                                      >
+                                        {blobUrl ? (
+                                          <img
+                                            src={blobUrl}
+                                            alt={`floorplan-${idx}`}
+                                            className="w-full h-24 object-cover rounded-lg"
+                                          />
+                                        ) : (
+                                          <div className="w-full h-24 flex items-center justify-center bg-gray-100 rounded-lg">
+                                            <ImageIcon className="h-6 w-6 text-gray-400" />
+                                          </div>
+                                        )}
+                                      </button>
+                                      <button
+                                        onClick={() =>
+                                          downloadFile(
+                                            url,
+                                            `floorplan_image_${selected._id}_${idx + 1}.${getExtension(url)}`,
+                                            false
+                                          )
+                                        }
+                                        className="absolute bottom-1 right-1 bg-black/50 p-1 rounded text-white opacity-0 group-hover:opacity-100 transition"
+                                        title="Download image"
+                                      >
+                                        <Download className="h-3 w-3" />
+                                      </button>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             </div>
                           )}
-                          {!selected.planFileUrl && !selected.floorplanPdfUrl && (!selected.floorplanImageUrls?.length) && (
-                            <div className="text-gray-500 text-sm">No files uploaded.</div>
-                          )}
+
+                          {!selected.planFileUrl &&
+                            !selected.floorplanPdfUrl &&
+                            (!selected.floorplanImageUrls?.length) && (
+                              <div className="text-gray-500 text-sm">No files uploaded.</div>
+                            )}
                         </div>
                       </div>
 

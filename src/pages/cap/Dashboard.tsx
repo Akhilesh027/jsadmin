@@ -230,18 +230,6 @@ export default function CAPDashboard() {
           </div>
         </Link>
 
-        <Link
-          to="/cap/logs"
-          className="stat-card flex items-center gap-4 hover:border-primary/50 border border-transparent"
-        >
-          <div className="h-12 w-12 rounded-xl bg-info/10 flex items-center justify-center">
-            <Eye className="h-6 w-6 text-info" />
-          </div>
-          <div>
-            <p className="font-semibold text-foreground">View Logs</p>
-            <p className="text-sm text-muted-foreground">Admin activity</p>
-          </div>
-        </Link>
       </div>
 
       {/* Recent Activity */}

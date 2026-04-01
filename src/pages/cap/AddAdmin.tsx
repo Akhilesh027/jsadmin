@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +22,16 @@ type AdminRole =
   | "ecommerce_admin"
   | "cap_admin";
 
+type Admin = {
+  _id: string;
+  name: string;
+  email: string;
+  mobile: string;
+  role: AdminRole;
+  isActive?: boolean;
+  createdAt?: string;
+};
+
 type FormState = {
   name: string;
   email: string;
@@ -39,10 +49,11 @@ const safeJson = async (res: Response) => {
   }
 };
 
-export default function AddAdmin() {
+export default function AdminForm() {
   const navigate = useNavigate();
+  const { id } = useParams(); // e.g., /cap/admins/edit/:id
   const [loading, setLoading] = useState(false);
-
+  const [fetching, setFetching] = useState(false);
   const [formData, setFormData] = useState<FormState>({
     name: "",
     email: "",
@@ -52,7 +63,51 @@ export default function AddAdmin() {
     confirmPassword: "",
   });
 
+  const isEdit = !!id;
   const token = localStorage.getItem("token");
+
+  const authHeaders = () => ({
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  });
+
+  // Fetch admin data if editing
+  useEffect(() => {
+    if (!isEdit) return;
+
+    const fetchAdmin = async () => {
+      setFetching(true);
+      try {
+        const res = await fetch(`${API_BASE}/${id}`, {
+          headers: authHeaders(),
+        });
+        const data = await safeJson(res);
+        if (!res.ok) throw new Error(data?.message || "Failed to load admin");
+        const admin = data.admin || data; // adjust based on your API response shape
+        if (admin) {
+          setFormData({
+            name: admin.name || "",
+            email: admin.email || "",
+            mobile: admin.mobile || "",
+            role: admin.role || "",
+            password: "",
+            confirmPassword: "",
+          });
+        }
+      } catch (err: any) {
+        toast({
+          title: "Failed to load admin",
+          description: err?.message || "Server error",
+          variant: "destructive",
+        });
+        navigate("/cap/admins");
+      } finally {
+        setFetching(false);
+      }
+    };
+
+    fetchAdmin();
+  }, [id, isEdit, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,7 +134,9 @@ export default function AddAdmin() {
       return;
     }
 
-    if (formData.password.length < 6) {
+    // Password validation only for create or when password is provided in edit
+    const password = formData.password.trim();
+    if (!isEdit && password.length < 6) {
       toast({
         title: "Weak password",
         description: "Password must be at least 6 characters.",
@@ -88,7 +145,7 @@ export default function AddAdmin() {
       return;
     }
 
-    if (formData.password !== formData.confirmPassword) {
+    if (password && password !== formData.confirmPassword.trim()) {
       toast({
         title: "Password mismatch",
         description: "Password and confirm password must match.",
@@ -99,47 +156,45 @@ export default function AddAdmin() {
 
     setLoading(true);
     try {
-      const payload = {
+      const payload: any = {
         name,
         email,
         mobile,
         role: formData.role,
-        password: formData.password,
       };
 
-      const res = await fetch(API_BASE, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+      // Include password only if provided (for edit) or always for create
+      if (!isEdit || password) {
+        payload.password = password;
+      }
+
+      let url = API_BASE;
+      let method = "POST";
+      if (isEdit) {
+        url = `${API_BASE}/${id}`;
+        method = "PUT";
+      }
+
+      const res = await fetch(url, {
+        method,
+        headers: authHeaders(),
         body: JSON.stringify(payload),
       });
 
       const data = await safeJson(res);
-      if (!res.ok) throw new Error(data?.message || "Failed to create admin");
+      if (!res.ok) throw new Error(data?.message || "Failed to save admin");
 
       toast({
-        title: "Admin Created",
-        description:
-          data?.message ||
-          `${payload.name} added as ${payload.role.replaceAll("_", " ")}.`,
-      });
-
-      // ✅ reset form quickly (optional)
-      setFormData({
-        name: "",
-        email: "",
-        mobile: "",
-        role: "",
-        password: "",
-        confirmPassword: "",
+        title: isEdit ? "Admin Updated" : "Admin Created",
+        description: isEdit
+          ? `${name} details updated.`
+          : `${name} added as ${payload.role.replaceAll("_", " ")}.`,
       });
 
       navigate("/cap/admins");
     } catch (err: any) {
       toast({
-        title: "Create failed",
+        title: isEdit ? "Update failed" : "Create failed",
         description: err?.message || "Server error",
         variant: "destructive",
       });
@@ -148,15 +203,35 @@ export default function AddAdmin() {
     }
   };
 
+  if (fetching) {
+    return (
+      <AdminLayout
+        panelType="cap"
+        title={isEdit ? "Edit Admin" : "Add New Admin"}
+        subtitle={isEdit ? "Loading admin data..." : "Create a new administrator account"}
+      >
+        <Card className="max-w-2xl">
+          <CardContent className="py-12 text-center">
+            <p>Loading...</p>
+          </CardContent>
+        </Card>
+      </AdminLayout>
+    );
+  }
+
   return (
     <AdminLayout
       panelType="cap"
-      title="Add New Admin"
-      subtitle="Create a new administrator account"
+      title={isEdit ? "Edit Admin" : "Add New Admin"}
+      subtitle={
+        isEdit
+          ? "Update administrator details"
+          : "Create a new administrator account"
+      }
     >
       <Card className="max-w-2xl">
         <CardHeader>
-          <CardTitle>Admin Details</CardTitle>
+          <CardTitle>{isEdit ? "Admin Details" : "Admin Details"}</CardTitle>
         </CardHeader>
 
         <CardContent>
@@ -172,6 +247,7 @@ export default function AddAdmin() {
                     setFormData({ ...formData, name: e.target.value })
                   }
                   required
+                  disabled={loading}
                 />
               </div>
 
@@ -186,6 +262,7 @@ export default function AddAdmin() {
                     setFormData({ ...formData, email: e.target.value })
                   }
                   required
+                  disabled={loading}
                 />
               </div>
 
@@ -199,6 +276,7 @@ export default function AddAdmin() {
                     setFormData({ ...formData, mobile: e.target.value })
                   }
                   required
+                  disabled={loading}
                 />
               </div>
 
@@ -209,6 +287,7 @@ export default function AddAdmin() {
                   onValueChange={(value) =>
                     setFormData({ ...formData, role: value as AdminRole })
                   }
+                  disabled={loading}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select role" />
@@ -228,41 +307,51 @@ export default function AddAdmin() {
                 </Select>
               </div>
 
+              {/* Password fields – optional for edit */}
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">
+                  Password {isEdit && "(leave blank to keep unchanged)"}
+                </Label>
                 <Input
                   id="password"
                   type="password"
-                  placeholder="Enter password"
+                  placeholder={isEdit ? "New password (optional)" : "Enter password"}
                   value={formData.password}
                   onChange={(e) =>
                     setFormData({ ...formData, password: e.target.value })
                   }
-                  required
+                  required={!isEdit}
+                  disabled={loading}
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="confirmPassword">Confirm Password</Label>
+                <Label htmlFor="confirmPassword">
+                  Confirm Password {isEdit && "(if changing)"}
+                </Label>
                 <Input
                   id="confirmPassword"
                   type="password"
-                  placeholder="Confirm password"
+                  placeholder={isEdit ? "Confirm new password" : "Confirm password"}
                   value={formData.confirmPassword}
                   onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      confirmPassword: e.target.value,
-                    })
+                    setFormData({ ...formData, confirmPassword: e.target.value })
                   }
-                  required
+                  required={!isEdit}
+                  disabled={loading}
                 />
               </div>
             </div>
 
             <div className="flex gap-4">
               <Button type="submit" disabled={loading}>
-                {loading ? "Creating..." : "Create Admin"}
+                {loading
+                  ? isEdit
+                    ? "Updating..."
+                    : "Creating..."
+                  : isEdit
+                  ? "Update Admin"
+                  : "Create Admin"}
               </Button>
 
               <Button

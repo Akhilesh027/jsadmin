@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox"; // Assuming you have a Checkbox component
 import {
   Dialog,
   DialogContent,
@@ -15,18 +16,9 @@ import {
 import { Check, X, Edit, Eye, Package, Trash2, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 
-/**
- * Assumptions (adjust endpoints if yours differ):
- * GET    /api/admin/catalogs
- * PUT    /api/admin/catalogs/:id         (edit) – accepts discount field
- * PATCH  /api/admin/catalogs/:id/status  (approve/reject)  body: { status: "approved" | "rejected", discount?: number }
- * DELETE /api/admin/catalogs/:id
- */
-
 const API_BASE = "https://api.jsgallor.com";
 
 type CatalogStatus = "pending" | "approved" | "rejected";
-
 type Tier = "affordable" | "mid_range" | "luxury";
 
 interface AdminCatalogItem {
@@ -38,30 +30,30 @@ interface AdminCatalogItem {
   shortDescription?: string;
   description?: string;
   price: number;
-  discount?: number;               // discount percentage
-  finalPrice?: number;             // computed on frontend
+  discount?: number;
+  gst?: number;
+  isCustomized?: boolean;        // NEW: indicates if product is customizable
+  finalPrice?: number;
   deliveryTime?: string;
   tier: Tier;
   status: CatalogStatus;
-
-  image?: string; // main image url
+  image?: string;
   galleryImages?: string[];
-
   createdAt?: string;
   updatedAt?: string;
 }
 
 const formatCurrency = (value: number) =>
-  new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(
-    value
-  );
+  new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(value);
 
-// Helper to compute final price
 const computeFinalPrice = (price: number, discount: number = 0): number => {
   return price * (1 - discount / 100);
 };
 
-// -------- API helper --------
+const computePriceWithGST = (price: number, gst: number = 0): number => {
+  return price * (1 + gst / 100);
+};
+
 const apiRequest = async (method: string, endpoint: string, data?: any) => {
   const token = localStorage.getItem("token");
   const res = await fetch(`${API_BASE}${endpoint}`, {
@@ -82,24 +74,19 @@ export default function CatalogApproval() {
   const [items, setItems] = useState<AdminCatalogItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
-  const [selectedItem, setSelectedItem] = useState<AdminCatalogItem | null>(
-    null
-  );
+  const [selectedItem, setSelectedItem] = useState<AdminCatalogItem | null>(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [viewModalOpen, setViewModalOpen] = useState(false);
 
-  // Discount approval state
   const [discountModalOpen, setDiscountModalOpen] = useState(false);
   const [discountValue, setDiscountValue] = useState<string>("");
   const [pendingApprovalItem, setPendingApprovalItem] = useState<AdminCatalogItem | null>(null);
 
   const [saving, setSaving] = useState(false);
 
-  // Filters
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<CatalogStatus | "all">("all");
 
-  // Edit form state
   const [editForm, setEditForm] = useState({
     productName: "",
     price: "",
@@ -108,7 +95,9 @@ export default function CatalogApproval() {
     deliveryTime: "",
     category: "",
     tier: "mid_range" as Tier,
-    discount: "", // discount percentage
+    discount: "",
+    gst: "",
+    isCustomized: false,           // NEW: boolean flag
   });
 
   const tierColors: Record<Tier, string> = {
@@ -122,7 +111,6 @@ export default function CatalogApproval() {
       setLoading(true);
       const data = await apiRequest("GET", "/api/admin/catalogs");
       const catalogs: AdminCatalogItem[] = data.catalogs || data.items || [];
-      // Compute final price if discount exists
       const processed = catalogs.map(item => ({
         ...item,
         finalPrice: computeFinalPrice(item.price, item.discount)
@@ -145,16 +133,13 @@ export default function CatalogApproval() {
 
   const filtered = useMemo(() => {
     const s = search.trim().toLowerCase();
-
     return items.filter((it) => {
       const matchesSearch =
         !s ||
         (it.productName || "").toLowerCase().includes(s) ||
         (it.manufacturerName || "").toLowerCase().includes(s) ||
         (it.category || "").toLowerCase().includes(s);
-
       const matchesStatus = statusFilter === "all" ? true : it.status === statusFilter;
-
       return matchesSearch && matchesStatus;
     });
   }, [items, search, statusFilter]);
@@ -170,6 +155,8 @@ export default function CatalogApproval() {
       category: item.category || "",
       tier: item.tier || "mid_range",
       discount: item.discount?.toString() ?? "0",
+      gst: item.gst?.toString() ?? "0",
+      isCustomized: item.isCustomized ?? false,     // load existing value
     });
     setEditModalOpen(true);
   };
@@ -304,6 +291,16 @@ export default function CatalogApproval() {
       return;
     }
 
+    const gstNum = parseFloat(editForm.gst);
+    if (isNaN(gstNum) || gstNum < 0 || gstNum > 100) {
+      toast({
+        title: "Error",
+        description: "GST must be a number between 0 and 100.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       setSaving(true);
 
@@ -316,6 +313,8 @@ export default function CatalogApproval() {
         deliveryTime: editForm.deliveryTime.trim(),
         tier: editForm.tier,
         discount: discountNum,
+        gst: gstNum,
+        isCustomized: editForm.isCustomized,     // include boolean flag
       };
 
       const data = await apiRequest(
@@ -386,12 +385,18 @@ export default function CatalogApproval() {
     }
   };
 
-  // Helper to get final price preview in edit modal
   const getEditFinalPrice = () => {
     const price = parseFloat(editForm.price);
     const discount = parseFloat(editForm.discount);
     if (isNaN(price) || isNaN(discount)) return null;
     return computeFinalPrice(price, discount);
+  };
+
+  const getEditPriceWithGST = () => {
+    const price = parseFloat(editForm.price);
+    const gst = parseFloat(editForm.gst);
+    if (isNaN(price) || isNaN(gst)) return null;
+    return computePriceWithGST(price, gst);
   };
 
   if (loading) {
@@ -423,7 +428,6 @@ export default function CatalogApproval() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-
         <div className="flex gap-2 items-center">
           <Label className="text-sm text-muted-foreground">Status</Label>
           <select
@@ -436,7 +440,6 @@ export default function CatalogApproval() {
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
           </select>
-
           <Button variant="outline" onClick={fetchCatalogs} disabled={saving}>
             Refresh
           </Button>
@@ -459,7 +462,6 @@ export default function CatalogApproval() {
               key={item._id}
               className="bg-card rounded-xl border border-border overflow-hidden hover:shadow-card-hover transition-all duration-300"
             >
-              {/* Image */}
               <div className="h-48 bg-muted flex items-center justify-center overflow-hidden">
                 {item.image ? (
                   <img
@@ -471,8 +473,6 @@ export default function CatalogApproval() {
                   <Package className="h-16 w-16 text-muted-foreground/50" />
                 )}
               </div>
-
-              {/* Content */}
               <div className="p-4">
                 <div className="flex items-start justify-between mb-2">
                   <div>
@@ -485,11 +485,9 @@ export default function CatalogApproval() {
                   </div>
                   <StatusBadge status={item.status} />
                 </div>
-
                 <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
                   {item.shortDescription || item.description || "—"}
                 </p>
-
                 <div className="flex items-center justify-between mb-2">
                   <div>
                     <span className="text-lg font-bold text-foreground">
@@ -510,7 +508,16 @@ export default function CatalogApproval() {
                     {item.discount}% discount applied
                   </p>
                 )}
-
+                {item.gst && item.gst > 0 && (
+                  <p className="text-xs text-muted-foreground mb-3">
+                    GST: {item.gst}%
+                  </p>
+                )}
+                {item.isCustomized && (
+                  <p className="text-xs text-muted-foreground mb-3">
+                    ✨ Customizable product
+                  </p>
+                )}
                 <div className="flex items-center gap-2">
                   <Button
                     variant="outline"
@@ -533,7 +540,6 @@ export default function CatalogApproval() {
                     Edit
                   </Button>
                 </div>
-
                 <div className="flex items-center gap-2 mt-2">
                   <Button
                     size="sm"
@@ -555,7 +561,6 @@ export default function CatalogApproval() {
                     Reject
                   </Button>
                 </div>
-
                 <Button
                   size="sm"
                   variant="outline"
@@ -599,22 +604,11 @@ export default function CatalogApproval() {
             </div>
           </div>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDiscountModalOpen(false)}
-              disabled={saving}
-            >
+            <Button variant="outline" onClick={() => setDiscountModalOpen(false)} disabled={saving}>
               Cancel
             </Button>
             <Button onClick={confirmApproveWithDiscount} disabled={saving}>
-              {saving ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Approving...
-                </>
-              ) : (
-                "Approve"
-              )}
+              {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : "Approve"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -626,7 +620,6 @@ export default function CatalogApproval() {
           <DialogHeader>
             <DialogTitle>{selectedItem?.productName}</DialogTitle>
           </DialogHeader>
-
           {selectedItem && (
             <div className="space-y-4">
               <div className="h-64 bg-muted rounded-lg flex items-center justify-center overflow-hidden">
@@ -640,7 +633,6 @@ export default function CatalogApproval() {
                   <Package className="h-24 w-24 text-muted-foreground/50" />
                 )}
               </div>
-
               {selectedItem.galleryImages?.length ? (
                 <div className="flex gap-2 overflow-x-auto pb-1">
                   {selectedItem.galleryImages.map((src, idx) => (
@@ -653,7 +645,6 @@ export default function CatalogApproval() {
                   ))}
                 </div>
               ) : null}
-
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label className="text-muted-foreground">Manufacturer</Label>
@@ -680,6 +671,16 @@ export default function CatalogApproval() {
                     <p className="font-medium text-success">{selectedItem.discount}%</p>
                   </div>
                 )}
+                {selectedItem.gst && selectedItem.gst > 0 && (
+                  <div>
+                    <Label className="text-muted-foreground">GST</Label>
+                    <p className="font-medium">{selectedItem.gst}%</p>
+                  </div>
+                )}
+                <div>
+                  <Label className="text-muted-foreground">Customizable</Label>
+                  <p className="font-medium">{selectedItem.isCustomized ? "Yes" : "No"}</p>
+                </div>
                 <div>
                   <Label className="text-muted-foreground">Delivery Time</Label>
                   <p className="font-medium">{selectedItem.deliveryTime || "—"}</p>
@@ -693,7 +694,6 @@ export default function CatalogApproval() {
                   <p className="font-medium">{selectedItem.status}</p>
                 </div>
               </div>
-
               <div>
                 <Label className="text-muted-foreground">Description</Label>
                 <p className="text-sm">{selectedItem.description || "—"}</p>
@@ -703,13 +703,12 @@ export default function CatalogApproval() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Modal with Final Price Preview */}
+      {/* Edit Modal with Customization Checkbox */}
       <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Edit Catalog Item</DialogTitle>
           </DialogHeader>
-
           {selectedItem && (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -765,61 +764,88 @@ export default function CatalogApproval() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label>Discount (%)</Label>
-                <Input
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  max="100"
-                  value={editForm.discount}
-                  onChange={(e) =>
-                    setEditForm((p) => ({ ...p, discount: e.target.value }))
-                  }
-                  disabled={saving}
-                  placeholder="0"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Discount (%)</Label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="100"
+                    value={editForm.discount}
+                    onChange={(e) =>
+                      setEditForm((p) => ({ ...p, discount: e.target.value }))
+                    }
+                    disabled={saving}
+                    placeholder="0"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>GST (%)</Label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="100"
+                    value={editForm.gst}
+                    onChange={(e) =>
+                      setEditForm((p) => ({ ...p, gst: e.target.value }))
+                    }
+                    disabled={saving}
+                    placeholder="0"
+                  />
+                </div>
               </div>
 
-              {/* Final Price Preview */}
-              {(() => {
-                const finalPrice = getEditFinalPrice();
-                const price = parseFloat(editForm.price);
-                const discount = parseFloat(editForm.discount);
-                const showPreview = !isNaN(finalPrice) && !isNaN(price);
-                return showPreview ? (
-                  <div className="bg-muted/30 rounded-lg p-3 border border-border">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Final Price after discount:</span>
-                      <div>
-                        <span className="font-bold text-foreground">
-                          {formatCurrency(finalPrice)}
-                        </span>
-                        {discount > 0 && (
-                          <span className="ml-2 text-xs line-through text-muted-foreground">
-                            {formatCurrency(price)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    {discount > 0 && (
-                      <div className="text-xs text-success mt-1">
-                        {discount}% discount applied
-                      </div>
+              {/* Customization Checkbox */}
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="isCustomized"
+                  checked={editForm.isCustomized}
+                  onCheckedChange={(checked) =>
+                    setEditForm((p) => ({ ...p, isCustomized: !!checked }))
+                  }
+                  disabled={saving}
+                />
+                <Label htmlFor="isCustomized" className="cursor-pointer">
+                  This product can be customized (e.g., size, color, material)
+                </Label>
+              </div>
+
+              {/* Price Previews */}
+              <div className="bg-muted/30 rounded-lg p-3 border border-border space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Final Price after discount:</span>
+                  <div>
+                    <span className="font-bold text-foreground">
+                      {getEditFinalPrice() !== null ? formatCurrency(getEditFinalPrice()!) : "—"}
+                    </span>
+                    {parseFloat(editForm.discount) > 0 && (
+                      <span className="ml-2 text-xs line-through text-muted-foreground">
+                        {formatCurrency(parseFloat(editForm.price) || 0)}
+                      </span>
                     )}
                   </div>
-                ) : null;
-              })()}
+                </div>
+                {parseFloat(editForm.discount) > 0 && (
+                  <div className="text-xs text-success">
+                    {editForm.discount}% discount applied
+                  </div>
+                )}
+                <div className="flex items-center justify-between text-sm pt-1 border-t border-border/50">
+                  <span className="text-muted-foreground">Price after GST (+{editForm.gst || 0}%):</span>
+                  <span className="font-bold text-foreground">
+                    {getEditPriceWithGST() !== null ? formatCurrency(getEditPriceWithGST()!) : "—"}
+                  </span>
+                </div>
+              </div>
 
               <div className="space-y-2">
                 <Label>Short Description</Label>
                 <Input
                   value={editForm.shortDescription}
                   onChange={(e) =>
-                    setEditForm((p) => ({
-                      ...p,
-                      shortDescription: e.target.value,
-                    }))
+                    setEditForm((p) => ({ ...p, shortDescription: e.target.value }))
                   }
                   disabled={saving}
                 />
@@ -849,24 +875,12 @@ export default function CatalogApproval() {
               </div>
             </div>
           )}
-
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setEditModalOpen(false)}
-              disabled={saving}
-            >
+            <Button variant="outline" onClick={() => setEditModalOpen(false)} disabled={saving}>
               Cancel
             </Button>
             <Button onClick={saveEdit} disabled={saving}>
-              {saving ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                "Save Changes"
-              )}
+              {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>

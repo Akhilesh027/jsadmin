@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "@/hooks/use-toast";
-import { Calendar, Loader2, Plus, Trash2 } from "lucide-react";
+import { Calendar, Loader2, Plus, Trash2, Image as ImageIcon } from "lucide-react";
 
 const API_BASE = "https://api.jsgallor.com";
 
@@ -24,11 +24,17 @@ type Manufacturer = {
   country?: string;
 };
 
+// ✅ Extended Product type with full details (including images)
 type Product = {
   _id: string;
   name: string;
   sku?: string;
   price?: number;
+  description?: string;
+  images?: string[];        // array of image URLs
+  category?: string;
+  stock?: number;
+  // ... other fields from your schema
 };
 
 type LineItem = {
@@ -36,6 +42,8 @@ type LineItem = {
   productName: string;
   sku?: string;
   quantity: number;
+  price?: number;           // store price at order time (optional)
+  image?: string;           // first image for display
 };
 
 type PurchaseOrder = {
@@ -80,17 +88,14 @@ export default function PlaceOrder() {
     }
   };
 
-  // ✅ fetch manufacturers
   const fetchVerifiedManufacturers = async () => {
     try {
       setLoadingMfg(true);
       const res = await fetch(`${API_BASE}/api/admin/manufacturers`);
       const data = await safeJson(res);
-
       if (!res.ok || !data?.success) {
         throw new Error(data?.message || "Failed to load manufacturers");
       }
-
       setManufacturers(Array.isArray(data.manufacturers) ? data.manufacturers : []);
     } catch (err: any) {
       toast({
@@ -103,17 +108,12 @@ export default function PlaceOrder() {
     }
   };
 
-  // ✅ fetch products for selected manufacturer - FIXED
   const fetchProductsForManufacturer = async (manufacturerId: string) => {
     try {
       setLoadingProducts(true);
-      const res = await fetch(
-        `${API_BASE}/api/admin/manufacturers/products/${manufacturerId}`
-      );
+      const res = await fetch(`${API_BASE}/api/admin/manufacturers/products/${manufacturerId}`);
       const data = await safeJson(res);
       if (!res.ok || !data?.success) throw new Error(data?.message || "Failed to load products");
-
-      // ✅ CORRECT: set products, NOT manufacturers
       setProducts(Array.isArray(data.products) ? data.products : []);
     } catch (err: any) {
       toast({
@@ -127,19 +127,14 @@ export default function PlaceOrder() {
     }
   };
 
-  // ✅ fetch orders for selected manufacturer
   const fetchOrdersForManufacturer = async (manufacturerId: string) => {
     try {
       setLoadingOrders(true);
-      const res = await fetch(
-        `${API_BASE}/api/admin/orders?manufacturerId=${manufacturerId}`
-      );
+      const res = await fetch(`${API_BASE}/api/admin/orders?manufacturerId=${manufacturerId}`);
       const data = await safeJson(res);
-
       if (!res.ok || !data?.success) {
         throw new Error(data?.message || "Failed to load orders");
       }
-
       setOrders(Array.isArray(data.orders) ? data.orders : []);
     } catch (err: any) {
       toast({
@@ -168,7 +163,6 @@ export default function PlaceOrder() {
     fetchOrdersForManufacturer(selectedManufacturerId);
   }, [selectedManufacturerId]);
 
-  // Add product to line items
   const addProductToOrder = () => {
     if (!selectedProductId) {
       toast({ title: "Error", description: "Select a product", variant: "destructive" });
@@ -182,10 +176,10 @@ export default function PlaceOrder() {
     const product = products.find(p => p._id === selectedProductId);
     if (!product) return;
 
-    // Check if product already added
+    const firstImage = product.images && product.images.length > 0 ? product.images[0] : undefined;
+
     const existingIndex = lineItems.findIndex(item => item.productId === selectedProductId);
     if (existingIndex !== -1) {
-      // Update quantity
       const newItems = [...lineItems];
       newItems[existingIndex].quantity += itemQuantity;
       setLineItems(newItems);
@@ -197,11 +191,12 @@ export default function PlaceOrder() {
           productName: product.name,
           sku: product.sku,
           quantity: itemQuantity,
+          price: product.price,
+          image: firstImage,
         },
       ]);
     }
 
-    // Reset selection
     setSelectedProductId("");
     setItemQuantity(1);
   };
@@ -225,12 +220,10 @@ export default function PlaceOrder() {
       toast({ title: "Error", description: "Please select manufacturer", variant: "destructive" });
       return;
     }
-
     if (lineItems.length === 0) {
       toast({ title: "Error", description: "At least one product is required", variant: "destructive" });
       return;
     }
-
     if (!formData.address || !formData.expectedDate || !formData.paymentOption) {
       toast({
         title: "Error",
@@ -242,7 +235,6 @@ export default function PlaceOrder() {
 
     try {
       setSubmitting(true);
-
       const payload = {
         manufacturerId: selectedManufacturerId,
         items: lineItems.map(item => ({
@@ -265,7 +257,6 @@ export default function PlaceOrder() {
       });
 
       const data = await safeJson(res);
-
       if (!res.ok || !data?.success) {
         throw new Error(data?.message || "Failed to create order");
       }
@@ -275,7 +266,6 @@ export default function PlaceOrder() {
         description: mode === "draft" ? "Order saved as draft." : "Order sent to manufacturer.",
       });
 
-      // Reset form except manufacturer
       setLineItems([]);
       setFormData({
         address: "",
@@ -285,8 +275,6 @@ export default function PlaceOrder() {
       });
       setSelectedProductId("");
       setItemQuantity(1);
-
-      // Refresh orders list
       fetchOrdersForManufacturer(selectedManufacturerId);
     } catch (err: any) {
       toast({ title: "Error", description: err.message || "Failed to submit order", variant: "destructive" });
@@ -297,20 +285,17 @@ export default function PlaceOrder() {
 
   const getStatusPill = (status: PurchaseOrder["status"]) => {
     switch (status) {
-      case "draft":
-        return "bg-muted text-muted-foreground";
-      case "sent":
-        return "bg-blue-500/10 text-blue-500";
-      case "accepted":
-        return "bg-green-500/10 text-green-500";
-      case "rejected":
-        return "bg-red-500/10 text-red-500";
-      case "completed":
-        return "bg-purple-500/10 text-purple-500";
-      default:
-        return "bg-muted text-muted-foreground";
+      case "draft": return "bg-muted text-muted-foreground";
+      case "sent": return "bg-blue-500/10 text-blue-500";
+      case "accepted": return "bg-green-500/10 text-green-500";
+      case "rejected": return "bg-red-500/10 text-red-500";
+      case "completed": return "bg-purple-500/10 text-purple-500";
+      default: return "bg-muted text-muted-foreground";
     }
   };
+
+  // Get currently selected product details
+  const selectedProduct = products.find(p => p._id === selectedProductId);
 
   return (
     <AdminLayout
@@ -356,7 +341,7 @@ export default function PlaceOrder() {
                 </Select>
               </div>
 
-              {/* Product selection */}
+              {/* Product selection with image preview */}
               {selectedManufacturerId && (
                 <div className="space-y-2 border-t pt-4">
                   <Label>Add Product</Label>
@@ -373,6 +358,7 @@ export default function PlaceOrder() {
                         {products.map((p) => (
                           <SelectItem key={p._id} value={p._id}>
                             {p.name} {p.sku ? `(${p.sku})` : ""}
+                            {p.price ? ` - ₹${p.price}` : ""}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -389,15 +375,49 @@ export default function PlaceOrder() {
                     </Button>
                   </div>
 
-                  {/* Line items table */}
+                  {/* Product image & details preview */}
+                  {selectedProduct && (
+                    <div className="mt-2 p-3 border rounded-lg bg-muted/20 flex items-center gap-3">
+                      {selectedProduct.images && selectedProduct.images[0] ? (
+                        <img
+                          src={selectedProduct.images[0]}
+                          alt={selectedProduct.name}
+                          className="w-12 h-12 object-cover rounded-md border"
+                        />
+                      ) : (
+                        <div className="w-12 h-12 bg-muted rounded-md flex items-center justify-center">
+                          <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="flex-1">
+                        <p className="font-medium">{selectedProduct.name}</p>
+                        {selectedProduct.price && (
+                          <p className="text-sm text-muted-foreground">Price: ₹{selectedProduct.price}</p>
+                        )}
+                        {selectedProduct.description && (
+                          <p className="text-xs text-muted-foreground line-clamp-1">{selectedProduct.description}</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Line items table with images */}
                   {lineItems.length > 0 && (
                     <div className="mt-4 space-y-2">
                       <Label>Order Items</Label>
                       <div className="space-y-2">
                         {lineItems.map((item, idx) => (
                           <div key={idx} className="flex items-center gap-2 p-2 border rounded-lg">
+                            {item.image ? (
+                              <img src={item.image} alt={item.productName} className="w-8 h-8 object-cover rounded" />
+                            ) : (
+                              <div className="w-8 h-8 bg-muted rounded flex items-center justify-center">
+                                <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                              </div>
+                            )}
                             <div className="flex-1">
-                              <p className="font-medium">{item.productName}</p>
+                              <p className="font-medium text-sm">{item.productName}</p>
+                              {item.price && <p className="text-xs text-muted-foreground">₹{item.price}</p>}
                               {item.sku && <p className="text-xs text-muted-foreground">SKU: {item.sku}</p>}
                             </div>
                             <Input
@@ -528,7 +548,6 @@ export default function PlaceOrder() {
                           Expected: {new Date(o.expectedDate).toLocaleDateString()}
                         </p>
                       </div>
-
                       <span className={`px-2 py-1 text-xs rounded ${getStatusPill(o.status)}`}>
                         {o.status}
                       </span>

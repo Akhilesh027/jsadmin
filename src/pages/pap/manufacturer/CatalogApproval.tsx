@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox"; // Assuming you have a Checkbox component
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -32,7 +32,7 @@ interface AdminCatalogItem {
   price: number;
   discount?: number;
   gst?: number;
-  isCustomized?: boolean;        // NEW: indicates if product is customizable
+  isCustomized?: boolean;
   finalPrice?: number;
   deliveryTime?: string;
   tier: Tier;
@@ -97,7 +97,7 @@ export default function CatalogApproval() {
     tier: "mid_range" as Tier,
     discount: "",
     gst: "",
-    isCustomized: false,           // NEW: boolean flag
+    isCustomized: false,
   });
 
   const tierColors: Record<Tier, string> = {
@@ -156,7 +156,7 @@ export default function CatalogApproval() {
       tier: item.tier || "mid_range",
       discount: item.discount?.toString() ?? "0",
       gst: item.gst?.toString() ?? "0",
-      isCustomized: item.isCustomized ?? false,     // load existing value
+      isCustomized: item.isCustomized ?? false,
     });
     setEditModalOpen(true);
   };
@@ -314,7 +314,7 @@ export default function CatalogApproval() {
         tier: editForm.tier,
         discount: discountNum,
         gst: gstNum,
-        isCustomized: editForm.isCustomized,     // include boolean flag
+        isCustomized: editForm.isCustomized,
       };
 
       const data = await apiRequest(
@@ -485,9 +485,10 @@ export default function CatalogApproval() {
                   </div>
                   <StatusBadge status={item.status} />
                 </div>
-                <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
+                {/* FIX: preserve line breaks in description */}
+                <div className="text-sm text-muted-foreground line-clamp-2 whitespace-pre-wrap mb-3">
                   {item.shortDescription || item.description || "—"}
-                </p>
+                </div>
                 <div className="flex items-center justify-between mb-2">
                   <div>
                     <span className="text-lg font-bold text-foreground">
@@ -696,14 +697,15 @@ export default function CatalogApproval() {
               </div>
               <div>
                 <Label className="text-muted-foreground">Description</Label>
-                <p className="text-sm">{selectedItem.description || "—"}</p>
+                {/* FIX: preserve line breaks in modal description */}
+                <div className="text-sm whitespace-pre-wrap">{selectedItem.description || "—"}</div>
               </div>
             </div>
           )}
         </DialogContent>
       </Dialog>
 
-      {/* Edit Modal with Customization Checkbox */}
+      {/* Edit Modal */}
       <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
@@ -797,7 +799,6 @@ export default function CatalogApproval() {
                 </div>
               </div>
 
-              {/* Customization Checkbox */}
               <div className="flex items-center space-x-2">
                 <Checkbox
                   id="isCustomized"
@@ -812,7 +813,6 @@ export default function CatalogApproval() {
                 </Label>
               </div>
 
-              {/* Price Previews */}
               <div className="bg-muted/30 rounded-lg p-3 border border-border space-y-2">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Final Price after discount:</span>

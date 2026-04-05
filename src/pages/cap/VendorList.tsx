@@ -7,7 +7,7 @@ import { Eye, Edit, Trash2, Check } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { Progress } from "@/components/ui/progress";
 
-const API_BASE = "http://localhost:5000"; // change if needed
+const API_BASE = "https://api.jsgallor.com"; // change if needed
 
 export type Vendor = {
   _id: string;

@@ -37,6 +37,21 @@ type Estimate = {
 
 type ApiResp<T> = { success: boolean; message?: string; data: T };
 
+// Helper to get the absolute file URL
+const getFileUrl = (relativeUrl: string): string => {
+  if (relativeUrl.startsWith("http")) return relativeUrl;
+  // In development, rely on Vite proxy (no prefix needed)
+  if (import.meta.env.DEV) return relativeUrl;
+  // In production, prepend the API base
+  return `${API_BASE}${relativeUrl}`;
+};
+
+// Helper to get auth headers
+const getAuthHeaders = (): HeadersInit => {
+  const token = localStorage.getItem("token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 const AdminEstimates: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [list, setList] = useState<Estimate[]>([]);
@@ -55,27 +70,21 @@ const AdminEstimates: React.FC = () => {
   const [downloadingAll, setDownloadingAll] = useState(false);
   const [imageBlobs, setImageBlobs] = useState<Map<string, string>>(new Map());
 
-  // Fetch image blob with authentication
-const fetchImageBlob = async (url: string): Promise<string | null> => {
-  try {
-    let fullUrl = url;
-    if (url.startsWith('/')) {
-      if (import.meta.env.DEV) {
-        fullUrl = url;
-      } else {
-        fullUrl = `${API_BASE}${url}`;
-      }
+  // Fetch image blob with authentication (only for thumbnails)
+  const fetchImageBlob = async (url: string): Promise<string | null> => {
+    try {
+      const fullUrl = getFileUrl(url);
+      const headers = getAuthHeaders();
+      const res = await fetch(fullUrl, { headers });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      return URL.createObjectURL(blob);
+    } catch (err) {
+      console.error("Image load error:", err);
+      return null;
     }
-    const headers = getAuthHeaders();
-    const res = await fetch(fullUrl, { headers });
-    if (!res.ok) throw new Error(`Failed to load image: ${res.status}`);
-    const blob = await res.blob();
-    return URL.createObjectURL(blob);
-  } catch (err) {
-    console.error('Image load error:', err);
-    return null;
-  }
-};
+  };
+
   // Load images for selected estimate
   useEffect(() => {
     if (!selected?.floorplanImageUrls?.length) return;
@@ -89,56 +98,33 @@ const fetchImageBlob = async (url: string): Promise<string | null> => {
     };
     loadImages();
     return () => {
-      // Cleanup blob URLs
       imageBlobs.forEach((blobUrl) => URL.revokeObjectURL(blobUrl));
     };
   }, [selected?.floorplanImageUrls]);
-const downloadFile = async (url: string, filename: string, openInNewTab = false) => {
-  try {
-    // If URL is relative and we are in development, keep it relative (use proxy)
-    let fullUrl = url;
-    if (url.startsWith('/')) {
-      if (import.meta.env.DEV) {
-        fullUrl = url; // relative, will be proxied
-      } else {
-        fullUrl = `${API_BASE}${url}`;
-      }
-    }
 
-    // Determine if we should send auth headers (only for same origin or API origin)
-    let headers: HeadersInit = {};
-    try {
-      const parsed = new URL(fullUrl);
-      const currentOrigin = window.location.origin;
-      const apiOrigin = new URL(API_BASE).origin;
-      if (parsed.origin === currentOrigin || parsed.origin === apiOrigin) {
-        headers = getAuthHeaders();
-      }
-    } catch (e) {
-      console.warn('Invalid URL:', url);
-    }
-
-    const response = await fetch(fullUrl, { headers });
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        toast({
-          title: "Cannot view/download",
-          description: "This file requires authentication. Please ensure you are logged in and try again.",
-          variant: "destructive",
-        });
-        return;
-      }
-      throw new Error(`Failed to fetch file: ${response.status}`);
-    }
-
-    const blob = await response.blob();
-    const blobUrl = URL.createObjectURL(blob);
-
+  // Unified file handler: view (open in new tab) or download (save as)
+  const handleFile = async (url: string, filename: string, openInNewTab = false) => {
+    const fullUrl = getFileUrl(url);
+    // For viewing, directly open the URL – no fetch, no CORS issues
     if (openInNewTab) {
-      window.open(blobUrl, '_blank');
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
-    } else {
+      window.open(fullUrl, "_blank");
+      return;
+    }
+
+    // For downloading, fetch with auth and save as blob
+    try {
+      const headers = getAuthHeaders();
+      const response = await fetch(fullUrl, { headers });
+      if (!response.ok) {
+        let errorMsg = `HTTP ${response.status}`;
+        try {
+          const text = await response.text();
+          errorMsg = text.substring(0, 100);
+        } catch (e) {}
+        throw new Error(errorMsg);
+      }
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = blobUrl;
       link.download = filename;
@@ -146,21 +132,15 @@ const downloadFile = async (url: string, filename: string, openInNewTab = false)
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(blobUrl);
+      toast({ title: "Download started", description: filename });
+    } catch (err: any) {
+      console.error("Download error:", err);
+      toast({
+        title: "Download failed",
+        description: err.message || "Network error – check console",
+        variant: "destructive",
+      });
     }
-  } catch (err: any) {
-    console.error("File operation error:", err);
-    toast({
-      title: "Failed",
-      description: err?.message || "Could not process the file.",
-      variant: "destructive",
-    });
-  }
-};
-
-
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem("token");
-    return token ? { Authorization: `Bearer ${token}` } : {};
   };
 
   const fetchList = async () => {
@@ -505,7 +485,7 @@ const downloadFile = async (url: string, filename: string, openInNewTab = false)
                     </tr>
                   ))}
                 </tbody>
-              </table>
+               </table>
             </div>
           </div>
 
@@ -599,7 +579,7 @@ const downloadFile = async (url: string, filename: string, openInNewTab = false)
                                   <span className="font-medium">2D/3D Plan:</span>{" "}
                                   <button
                                     onClick={() =>
-                                      downloadFile(
+                                      handleFile(
                                         selected.planFileUrl!,
                                         `plan_${selected._id}.${getExtension(selected.planFileUrl!)}`,
                                         true
@@ -613,7 +593,7 @@ const downloadFile = async (url: string, filename: string, openInNewTab = false)
                               </div>
                               <button
                                 onClick={() =>
-                                  downloadFile(
+                                  handleFile(
                                     selected.planFileUrl!,
                                     `plan_${selected._id}.${getExtension(selected.planFileUrl!)}`,
                                     false
@@ -634,7 +614,7 @@ const downloadFile = async (url: string, filename: string, openInNewTab = false)
                                   <span className="font-medium">Floorplan PDF:</span>{" "}
                                   <button
                                     onClick={() =>
-                                      downloadFile(
+                                      handleFile(
                                         selected.floorplanPdfUrl!,
                                         `floorplan_${selected._id}.pdf`,
                                         true
@@ -648,7 +628,7 @@ const downloadFile = async (url: string, filename: string, openInNewTab = false)
                               </div>
                               <button
                                 onClick={() =>
-                                  downloadFile(
+                                  handleFile(
                                     selected.floorplanPdfUrl!,
                                     `floorplan_${selected._id}.pdf`,
                                     false
@@ -674,7 +654,7 @@ const downloadFile = async (url: string, filename: string, openInNewTab = false)
                                     <div key={idx} className="relative group">
                                       <button
                                         onClick={() =>
-                                          downloadFile(
+                                          handleFile(
                                             url,
                                             `floorplan_image_${selected._id}_${idx + 1}.${getExtension(url)}`,
                                             true
@@ -696,7 +676,7 @@ const downloadFile = async (url: string, filename: string, openInNewTab = false)
                                       </button>
                                       <button
                                         onClick={() =>
-                                          downloadFile(
+                                          handleFile(
                                             url,
                                             `floorplan_image_${selected._id}_${idx + 1}.${getExtension(url)}`,
                                             false

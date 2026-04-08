@@ -40,9 +40,7 @@ type ApiResp<T> = { success: boolean; message?: string; data: T };
 // Helper to get the absolute file URL
 const getFileUrl = (relativeUrl: string): string => {
   if (relativeUrl.startsWith("http")) return relativeUrl;
-  // In development, rely on Vite proxy (no prefix needed)
   if (import.meta.env.DEV) return relativeUrl;
-  // In production, prepend the API base
   return `${API_BASE}${relativeUrl}`;
 };
 
@@ -105,13 +103,11 @@ const AdminEstimates: React.FC = () => {
   // Unified file handler: view (open in new tab) or download (save as)
   const handleFile = async (url: string, filename: string, openInNewTab = false) => {
     const fullUrl = getFileUrl(url);
-    // For viewing, directly open the URL – no fetch, no CORS issues
     if (openInNewTab) {
       window.open(fullUrl, "_blank");
       return;
     }
 
-    // For downloading, fetch with auth and save as blob
     try {
       const headers = getAuthHeaders();
       const response = await fetch(fullUrl, { headers });
@@ -191,8 +187,15 @@ const AdminEstimates: React.FC = () => {
     }
   };
 
+  // ✅ UPDATED: with confirmation dialog
   const handleSaveAmounts = async () => {
     if (!selected) return;
+
+    const confirmSave = window.confirm(
+      `Are you sure you want to save the amounts?\n\nEstimated: ₹${estimatedAmount || "—"}\nTotal: ₹${totalAmount || "—"}`
+    );
+    if (!confirmSave) return;
+
     setSaving(true);
     setError("");
     try {
@@ -485,7 +488,7 @@ const AdminEstimates: React.FC = () => {
                     </tr>
                   ))}
                 </tbody>
-               </table>
+              </table>
             </div>
           </div>
 

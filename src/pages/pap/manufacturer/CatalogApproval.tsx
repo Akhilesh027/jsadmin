@@ -16,7 +16,7 @@ import {
 import { Check, X, Edit, Eye, Package, Trash2, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 
-const API_BASE = "https://api.jsgallor.com";
+const API_BASE = "http://localhost:5000";
 
 type CatalogStatus = "pending" | "approved" | "rejected";
 type Tier = "affordable" | "mid_range" | "luxury";
@@ -87,6 +87,12 @@ export default function CatalogApproval() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<CatalogStatus | "all">("all");
 
+  // Global GST toggle (affects list and view modal)
+  const [gstInclusive, setGstInclusive] = useState<boolean>(false);
+
+  // Edit modal local GST toggle
+  const [editGstInclusive, setEditGstInclusive] = useState<boolean>(false);
+
   const [editForm, setEditForm] = useState({
     productName: "",
     price: "",
@@ -144,6 +150,19 @@ export default function CatalogApproval() {
     });
   }, [items, search, statusFilter]);
 
+  // Helper to get display prices based on global toggle
+  const getDisplayPrices = (item: AdminCatalogItem) => {
+    const baseFinal = item.finalPrice ?? computeFinalPrice(item.price, item.discount);
+    const gstRate = item.gst ?? 0;
+    if (gstInclusive) {
+      const finalIncl = computePriceWithGST(baseFinal, gstRate);
+      const originalIncl = computePriceWithGST(item.price, gstRate);
+      return { final: finalIncl, original: originalIncl };
+    } else {
+      return { final: baseFinal, original: item.price };
+    }
+  };
+
   const openEdit = (item: AdminCatalogItem) => {
     setSelectedItem(item);
     setEditForm({
@@ -158,6 +177,7 @@ export default function CatalogApproval() {
       gst: item.gst?.toString() ?? "0",
       isCustomized: item.isCustomized ?? false,
     });
+    setEditGstInclusive(false); // reset to excl. GST when opening edit
     setEditModalOpen(true);
   };
 
@@ -385,6 +405,7 @@ export default function CatalogApproval() {
     }
   };
 
+  // Edit modal preview helpers
   const getEditFinalPrice = () => {
     const price = parseFloat(editForm.price);
     const discount = parseFloat(editForm.discount);
@@ -397,6 +418,16 @@ export default function CatalogApproval() {
     const gst = parseFloat(editForm.gst);
     if (isNaN(price) || isNaN(gst)) return null;
     return computePriceWithGST(price, gst);
+  };
+
+  const getEditDisplayPrice = () => {
+    const finalExcl = getEditFinalPrice();
+    if (finalExcl === null) return null;
+    const gst = parseFloat(editForm.gst);
+    if (editGstInclusive && !isNaN(gst)) {
+      return computePriceWithGST(finalExcl, gst);
+    }
+    return finalExcl;
   };
 
   if (loading) {
@@ -419,7 +450,7 @@ export default function CatalogApproval() {
       title="Catalog Approval"
       subtitle="Review, approve, edit, and delete manufacturer catalogs"
     >
-      {/* Filters */}
+      {/* Filters + Global GST Toggle */}
       <div className="flex flex-col md:flex-row gap-3 md:items-center mb-6">
         <div className="flex-1">
           <Input
@@ -444,9 +475,28 @@ export default function CatalogApproval() {
             Refresh
           </Button>
         </div>
+        {/* Global GST toggle */}
+        <div className="flex gap-1 p-0.5 bg-muted rounded-md">
+          <Button
+            variant={!gstInclusive ? "default" : "ghost"}
+            size="sm"
+            onClick={() => setGstInclusive(false)}
+            className="h-8 px-3"
+          >
+            Excl. GST
+          </Button>
+          <Button
+            variant={gstInclusive ? "default" : "ghost"}
+            size="sm"
+            onClick={() => setGstInclusive(true)}
+            className="h-8 px-3"
+          >
+            Incl. GST
+          </Button>
+        </div>
       </div>
 
-      {/* Grid */}
+      {/* Grid (unchanged except using getDisplayPrices) */}
       {filtered.length === 0 ? (
         <div className="bg-card rounded-xl border border-border p-10 text-center">
           <div className="mx-auto h-14 w-14 rounded-full bg-muted flex items-center justify-center mb-3">
@@ -457,128 +507,131 @@ export default function CatalogApproval() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filtered.map((item) => (
-            <div
-              key={item._id}
-              className="bg-card rounded-xl border border-border overflow-hidden hover:shadow-card-hover transition-all duration-300"
-            >
-              <div className="h-48 bg-muted flex items-center justify-center overflow-hidden">
-                {item.image ? (
-                  <img
-                    src={item.image}
-                    alt={item.productName}
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <Package className="h-16 w-16 text-muted-foreground/50" />
-                )}
-              </div>
-              <div className="p-4">
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <h3 className="font-semibold text-foreground line-clamp-1">
-                      {item.productName}
-                    </h3>
-                    <p className="text-sm text-muted-foreground">
-                      {item.manufacturerName}
-                    </p>
+          {filtered.map((item) => {
+            const { final: displayFinal, original: displayOriginal } = getDisplayPrices(item);
+            const hasDiscount = item.discount && item.discount > 0;
+            return (
+              <div
+                key={item._id}
+                className="bg-card rounded-xl border border-border overflow-hidden hover:shadow-card-hover transition-all duration-300"
+              >
+                <div className="h-48 bg-muted flex items-center justify-center overflow-hidden">
+                  {item.image ? (
+                    <img
+                      src={item.image}
+                      alt={item.productName}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <Package className="h-16 w-16 text-muted-foreground/50" />
+                  )}
+                </div>
+                <div className="p-4">
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <h3 className="font-semibold text-foreground line-clamp-1">
+                        {item.productName}
+                      </h3>
+                      <p className="text-sm text-muted-foreground">
+                        {item.manufacturerName}
+                      </p>
+                    </div>
+                    <StatusBadge status={item.status} />
                   </div>
-                  <StatusBadge status={item.status} />
-                </div>
-                {/* FIX: preserve line breaks in description */}
-                <div className="text-sm text-muted-foreground line-clamp-2 whitespace-pre-wrap mb-3">
-                  {item.shortDescription || item.description || "—"}
-                </div>
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <span className="text-lg font-bold text-foreground">
-                      {formatCurrency(item.finalPrice ?? item.price)}
-                    </span>
-                    {item.discount && item.discount > 0 && (
-                      <span className="ml-2 text-xs line-through text-muted-foreground">
-                        {formatCurrency(item.price)}
+                  <div className="text-sm text-muted-foreground line-clamp-2 whitespace-pre-wrap mb-3">
+                    {item.shortDescription || item.description || "—"}
+                  </div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <span className="text-lg font-bold text-foreground">
+                        {formatCurrency(displayFinal)}
                       </span>
-                    )}
+                      {hasDiscount && (
+                        <span className="ml-2 text-xs line-through text-muted-foreground">
+                          {formatCurrency(displayOriginal)}
+                        </span>
+                      )}
+                    </div>
+                    <span className={`badge-status ${tierColors[item.tier]}`}>
+                      {item.tier.replace("_", " ")}
+                    </span>
                   </div>
-                  <span className={`badge-status ${tierColors[item.tier]}`}>
-                    {item.tier.replace("_", " ")}
-                  </span>
-                </div>
-                {item.discount && item.discount > 0 && (
-                  <p className="text-xs text-success mb-3">
-                    {item.discount}% discount applied
-                  </p>
-                )}
-                {item.gst && item.gst > 0 && (
-                  <p className="text-xs text-muted-foreground mb-3">
-                    GST: {item.gst}%
-                  </p>
-                )}
-                {item.isCustomized && (
-                  <p className="text-xs text-muted-foreground mb-3">
-                    ✨ Customizable product
-                  </p>
-                )}
-                <div className="flex items-center gap-2">
+                  {hasDiscount && (
+                    <p className="text-xs text-success mb-3">
+                      {item.discount}% discount applied
+                    </p>
+                  )}
+                  {item.gst && item.gst > 0 && (
+                    <p className="text-xs text-muted-foreground mb-3">
+                      GST: {item.gst}% {gstInclusive && "(included)"}
+                    </p>
+                  )}
+                  {item.isCustomized && (
+                    <p className="text-xs text-muted-foreground mb-3">
+                      ✨ Customizable product
+                    </p>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => openView(item)}
+                      disabled={saving}
+                    >
+                      <Eye className="h-4 w-4 mr-1" />
+                      View
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => openEdit(item)}
+                      disabled={saving}
+                    >
+                      <Edit className="h-4 w-4 mr-1" />
+                      Edit
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2 mt-2">
+                    <Button
+                      size="sm"
+                      className="flex-1 bg-success hover:bg-success/90"
+                      onClick={() => updateStatus(item, "approved")}
+                      disabled={saving || item.status === "approved"}
+                    >
+                      <Check className="h-4 w-4 mr-1" />
+                      Approve
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="flex-1"
+                      onClick={() => updateStatus(item, "rejected")}
+                      disabled={saving || item.status === "rejected"}
+                    >
+                      <X className="h-4 w-4 mr-1" />
+                      Reject
+                    </Button>
+                  </div>
                   <Button
-                    variant="outline"
                     size="sm"
-                    className="flex-1"
-                    onClick={() => openView(item)}
+                    variant="outline"
+                    className="w-full mt-2 text-destructive border-destructive/30 hover:bg-destructive/10"
+                    onClick={() => deleteCatalog(item)}
                     disabled={saving}
                   >
-                    <Eye className="h-4 w-4 mr-1" />
-                    View
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1"
-                    onClick={() => openEdit(item)}
-                    disabled={saving}
-                  >
-                    <Edit className="h-4 w-4 mr-1" />
-                    Edit
+                    <Trash2 className="h-4 w-4 mr-1" />
+                    Delete
                   </Button>
                 </div>
-                <div className="flex items-center gap-2 mt-2">
-                  <Button
-                    size="sm"
-                    className="flex-1 bg-success hover:bg-success/90"
-                    onClick={() => updateStatus(item, "approved")}
-                    disabled={saving || item.status === "approved"}
-                  >
-                    <Check className="h-4 w-4 mr-1" />
-                    Approve
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    className="flex-1"
-                    onClick={() => updateStatus(item, "rejected")}
-                    disabled={saving || item.status === "rejected"}
-                  >
-                    <X className="h-4 w-4 mr-1" />
-                    Reject
-                  </Button>
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="w-full mt-2 text-destructive border-destructive/30 hover:bg-destructive/10"
-                  onClick={() => deleteCatalog(item)}
-                  disabled={saving}
-                >
-                  <Trash2 className="h-4 w-4 mr-1" />
-                  Delete
-                </Button>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {/* Discount Approval Modal */}
+      {/* Discount Approval Modal (unchanged) */}
       <Dialog open={discountModalOpen} onOpenChange={setDiscountModalOpen}>
         <DialogContent>
           <DialogHeader>
@@ -615,7 +668,7 @@ export default function CatalogApproval() {
         </DialogContent>
       </Dialog>
 
-      {/* View Modal */}
+      {/* View Modal (updated to respect global GST toggle) */}
       <Dialog open={viewModalOpen} onOpenChange={setViewModalOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
@@ -657,14 +710,20 @@ export default function CatalogApproval() {
                 </div>
                 <div>
                   <Label className="text-muted-foreground">Price</Label>
-                  <p className="font-medium">
-                    {formatCurrency(selectedItem.finalPrice ?? selectedItem.price)}
-                    {selectedItem.discount && selectedItem.discount > 0 && (
-                      <span className="ml-2 text-xs line-through text-muted-foreground">
-                        {formatCurrency(selectedItem.price)}
-                      </span>
-                    )}
-                  </p>
+                  {(() => {
+                    const { final, original } = getDisplayPrices(selectedItem);
+                    const hasDiscount = selectedItem.discount && selectedItem.discount > 0;
+                    return (
+                      <p className="font-medium">
+                        {formatCurrency(final)}
+                        {hasDiscount && (
+                          <span className="ml-2 text-xs line-through text-muted-foreground">
+                            {formatCurrency(original)}
+                          </span>
+                        )}
+                      </p>
+                    );
+                  })()}
                 </div>
                 {selectedItem.discount && selectedItem.discount > 0 && (
                   <div>
@@ -675,7 +734,9 @@ export default function CatalogApproval() {
                 {selectedItem.gst && selectedItem.gst > 0 && (
                   <div>
                     <Label className="text-muted-foreground">GST</Label>
-                    <p className="font-medium">{selectedItem.gst}%</p>
+                    <p className="font-medium">
+                      {selectedItem.gst}% {gstInclusive && "(included in shown price)"}
+                    </p>
                   </div>
                 )}
                 <div>
@@ -697,7 +758,6 @@ export default function CatalogApproval() {
               </div>
               <div>
                 <Label className="text-muted-foreground">Description</Label>
-                {/* FIX: preserve line breaks in modal description */}
                 <div className="text-sm whitespace-pre-wrap">{selectedItem.description || "—"}</div>
               </div>
             </div>
@@ -705,7 +765,7 @@ export default function CatalogApproval() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Modal */}
+      {/* Edit Modal with its own GST toggle */}
       <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
@@ -813,12 +873,36 @@ export default function CatalogApproval() {
                 </Label>
               </div>
 
+              {/* Edit modal GST preview toggle */}
+              <div className="flex justify-end">
+                <div className="flex gap-1 p-0.5 bg-muted rounded-md">
+                  <Button
+                    variant={!editGstInclusive ? "default" : "ghost"}
+                    size="sm"
+                    onClick={() => setEditGstInclusive(false)}
+                    className="h-7 px-2 text-xs"
+                  >
+                    Excl. GST
+                  </Button>
+                  <Button
+                    variant={editGstInclusive ? "default" : "ghost"}
+                    size="sm"
+                    onClick={() => setEditGstInclusive(true)}
+                    className="h-7 px-2 text-xs"
+                  >
+                    Incl. GST
+                  </Button>
+                </div>
+              </div>
+
               <div className="bg-muted/30 rounded-lg p-3 border border-border space-y-2">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Final Price after discount:</span>
+                  <span className="text-muted-foreground">
+                    {editGstInclusive ? "Final Price (incl. GST)" : "Final Price (excl. GST)"}
+                  </span>
                   <div>
                     <span className="font-bold text-foreground">
-                      {getEditFinalPrice() !== null ? formatCurrency(getEditFinalPrice()!) : "—"}
+                      {getEditDisplayPrice() !== null ? formatCurrency(getEditDisplayPrice()!) : "—"}
                     </span>
                     {parseFloat(editForm.discount) > 0 && (
                       <span className="ml-2 text-xs line-through text-muted-foreground">
@@ -832,11 +916,12 @@ export default function CatalogApproval() {
                     {editForm.discount}% discount applied
                   </div>
                 )}
-                <div className="flex items-center justify-between text-sm pt-1 border-t border-border/50">
-                  <span className="text-muted-foreground">Price after GST (+{editForm.gst || 0}%):</span>
-                  <span className="font-bold text-foreground">
-                    {getEditPriceWithGST() !== null ? formatCurrency(getEditPriceWithGST()!) : "—"}
-                  </span>
+                <div className="text-xs text-muted-foreground pt-1 border-t border-border/50">
+                  {editGstInclusive ? (
+                    <>GST ({editForm.gst || 0}%) is included in the price above.</>
+                  ) : (
+                    <>Add {editForm.gst || 0}% GST to get final customer price.</>
+                  )}
                 </div>
               </div>
 

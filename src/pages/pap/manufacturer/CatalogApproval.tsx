@@ -16,7 +16,7 @@ import {
 import { Check, X, Edit, Eye, Package, Trash2, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 
-const API_BASE = "http://localhost:5000";
+const API_BASE = "https://api.jsgallor.com";
 
 type CatalogStatus = "pending" | "approved" | "rejected";
 type Tier = "affordable" | "mid_range" | "luxury";

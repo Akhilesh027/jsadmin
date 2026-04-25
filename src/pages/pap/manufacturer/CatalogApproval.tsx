@@ -29,11 +29,10 @@ interface AdminCatalogItem {
   category: string;
   shortDescription?: string;
   description?: string;
-  price: number;               // always exclusive of GST
+  price: number;               // stored according to priceIncludesGst
   discount?: number;
   gst?: number;
   isCustomized?: boolean;
-  finalPrice?: number;         // can be deprecated, now compute on the fly
   deliveryTime?: string;
   tier: Tier;
   status: CatalogStatus;
@@ -41,26 +40,53 @@ interface AdminCatalogItem {
   galleryImages?: string[];
   createdAt?: string;
   updatedAt?: string;
-  priceIncludesGst?: boolean;  // flag to remember how price was entered
+  priceIncludesGst?: boolean;  // true = price already includes GST, false = price is exclusive
 }
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(value);
 
-// Compute discounted exclusive price
-const computeDiscountedExclusive = (price: number, discount: number = 0): number => {
-  return price * (1 - discount / 100);
+// Convert stored price to exclusive price (if needed)
+const getExclusivePriceFromStored = (storedPrice: number, gstPercent: number, priceIncludesGst: boolean): number => {
+  if (priceIncludesGst && gstPercent > 0) {
+    return storedPrice / (1 + gstPercent / 100);
+  }
+  return storedPrice;
 };
 
-// Compute final inclusive price after applying discount first, then GST on discounted amount
-const computeFinalInclusive = (price: number, discount: number = 0, gst: number = 0): number => {
-  const discountedExclusive = computeDiscountedExclusive(price, discount);
-  return discountedExclusive * (1 + gst / 100);
+// Compute final inclusive price after discount and GST
+const computeFinalInclusive = (
+  storedPrice: number,
+  discountPercent: number = 0,
+  gstPercent: number = 0,
+  priceIncludesGst: boolean = false
+): number => {
+  const exclusive = getExclusivePriceFromStored(storedPrice, gstPercent, priceIncludesGst);
+  const discountedExclusive = exclusive * (1 - discountPercent / 100);
+  return discountedExclusive * (1 + gstPercent / 100);
 };
 
 // Compute original inclusive price (without discount) for strikethrough
-const computeOriginalInclusive = (price: number, gst: number = 0): number => {
-  return price * (1 + gst / 100);
+const computeOriginalInclusive = (
+  storedPrice: number,
+  gstPercent: number = 0,
+  priceIncludesGst: boolean = false
+): number => {
+  if (priceIncludesGst) {
+    return storedPrice; // already inclusive
+  }
+  return storedPrice * (1 + gstPercent / 100);
+};
+
+// Compute discounted exclusive (for view modal)
+const computeDiscountedExclusive = (
+  storedPrice: number,
+  discountPercent: number = 0,
+  gstPercent: number = 0,
+  priceIncludesGst: boolean = false
+): number => {
+  const exclusive = getExclusivePriceFromStored(storedPrice, gstPercent, priceIncludesGst);
+  return exclusive * (1 - discountPercent / 100);
 };
 
 const apiRequest = async (method: string, endpoint: string, data?: any) => {
@@ -107,7 +133,7 @@ export default function CatalogApproval() {
     discount: "",
     gst: "",
     isCustomized: false,
-    priceIncludesGst: false,   // indicates entered price includes GST
+    priceIncludesGst: false,
   });
 
   const tierColors: Record<Tier, string> = {
@@ -263,7 +289,6 @@ export default function CatalogApproval() {
     }
   };
 
-  // Helper to compute exclusive price from inclusive if needed
   const getExclusivePrice = (inclusivePrice: number, gstPercent: number): number => {
     return inclusivePrice / (1 + gstPercent / 100);
   };
@@ -310,11 +335,11 @@ export default function CatalogApproval() {
       return;
     }
 
-    // If user says price includes GST, convert to exclusive for storage
-    let finalExclusivePrice = priceNum;
+    let finalStoredPrice = priceNum;
     if (editForm.priceIncludesGst && gstNum > 0) {
-      finalExclusivePrice = getExclusivePrice(priceNum, gstNum);
-      finalExclusivePrice = Math.round(finalExclusivePrice * 100) / 100;
+      // Convert inclusive to exclusive for storage
+      finalStoredPrice = priceNum / (1 + gstNum / 100);
+      finalStoredPrice = Math.round(finalStoredPrice * 100) / 100;
     }
 
     try {
@@ -323,7 +348,7 @@ export default function CatalogApproval() {
       const payload = {
         productName: editForm.productName.trim(),
         category: editForm.category.trim(),
-        price: finalExclusivePrice,
+        price: finalStoredPrice,
         shortDescription: editForm.shortDescription.trim(),
         description: editForm.description.trim(),
         deliveryTime: editForm.deliveryTime.trim(),
@@ -331,7 +356,7 @@ export default function CatalogApproval() {
         discount: discountNum,
         gst: gstNum,
         isCustomized: editForm.isCustomized,
-        priceIncludesGst: editForm.priceIncludesGst,
+        priceIncludesGst: editForm.priceIncludesGst, // store the flag
       };
 
       const data = await apiRequest(
@@ -398,7 +423,7 @@ export default function CatalogApproval() {
     }
   };
 
-  // Edit modal preview calculations (all based on discount first, then GST)
+  // Edit modal preview calculations (already correct, using the flag)
   const getEditExclusivePrice = (): number | null => {
     const price = parseFloat(editForm.price);
     const gst = parseFloat(editForm.gst);
@@ -450,7 +475,7 @@ export default function CatalogApproval() {
       title="Catalog Approval"
       subtitle="Review, approve, edit, and delete manufacturer catalogs"
     >
-      {/* Filters (GST toggle removed) */}
+      {/* Filters (no GST toggle) */}
       <div className="flex flex-col md:flex-row gap-3 md:items-center mb-6">
         <div className="flex-1">
           <Input
@@ -489,8 +514,17 @@ export default function CatalogApproval() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filtered.map((item) => {
-            const finalInclusive = computeFinalInclusive(item.price, item.discount || 0, item.gst || 0);
-            const originalInclusive = computeOriginalInclusive(item.price, item.gst || 0);
+            const finalInclusive = computeFinalInclusive(
+              item.price,
+              item.discount || 0,
+              item.gst || 0,
+              item.priceIncludesGst || false
+            );
+            const originalInclusive = computeOriginalInclusive(
+              item.price,
+              item.gst || 0,
+              item.priceIncludesGst || false
+            );
             const hasDiscount = item.discount && item.discount > 0;
             return (
               <div
@@ -650,7 +684,7 @@ export default function CatalogApproval() {
         </DialogContent>
       </Dialog>
 
-      {/* View Modal - Detailed breakdown following discount then GST rule */}
+      {/* View Modal - using correct priceIncludesGst flag */}
       <Dialog open={viewModalOpen} onOpenChange={setViewModalOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
@@ -691,8 +725,25 @@ export default function CatalogApproval() {
                   <p className="font-medium">{selectedItem.category}</p>
                 </div>
                 <div>
-                  <Label className="text-muted-foreground">Base Price (excl. GST)</Label>
-                  <p className="font-medium">{formatCurrency(selectedItem.price)}</p>
+                  <Label className="text-muted-foreground">Stored Price</Label>
+                  <p className="font-medium">
+                    {formatCurrency(selectedItem.price)}
+                    {selectedItem.priceIncludesGst && (
+                      <span className="text-xs text-muted-foreground ml-1">(incl. GST)</span>
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <Label className="text-muted-foreground">Exclusive Price (base)</Label>
+                  <p className="font-medium">
+                    {formatCurrency(
+                      getExclusivePriceFromStored(
+                        selectedItem.price,
+                        selectedItem.gst || 0,
+                        selectedItem.priceIncludesGst || false
+                      )
+                    )}
+                  </p>
                 </div>
                 {selectedItem.discount && selectedItem.discount > 0 && (
                   <>
@@ -703,7 +754,14 @@ export default function CatalogApproval() {
                     <div>
                       <Label className="text-muted-foreground">Discounted Price (excl. GST)</Label>
                       <p className="font-medium">
-                        {formatCurrency(computeDiscountedExclusive(selectedItem.price, selectedItem.discount))}
+                        {formatCurrency(
+                          computeDiscountedExclusive(
+                            selectedItem.price,
+                            selectedItem.discount,
+                            selectedItem.gst || 0,
+                            selectedItem.priceIncludesGst || false
+                          )
+                        )}
                       </p>
                     </div>
                   </>
@@ -714,8 +772,12 @@ export default function CatalogApproval() {
                       <Label className="text-muted-foreground">GST ({selectedItem.gst}%)</Label>
                       <p className="font-medium">
                         {formatCurrency(
-                          computeDiscountedExclusive(selectedItem.price, selectedItem.discount || 0) *
-                            (selectedItem.gst / 100)
+                          computeDiscountedExclusive(
+                            selectedItem.price,
+                            selectedItem.discount || 0,
+                            selectedItem.gst,
+                            selectedItem.priceIncludesGst || false
+                          ) * (selectedItem.gst / 100)
                         )}
                       </p>
                     </div>
@@ -723,7 +785,12 @@ export default function CatalogApproval() {
                       <Label className="text-muted-foreground">Final Price (incl. GST)</Label>
                       <p className="font-medium text-lg">
                         {formatCurrency(
-                          computeFinalInclusive(selectedItem.price, selectedItem.discount || 0, selectedItem.gst)
+                          computeFinalInclusive(
+                            selectedItem.price,
+                            selectedItem.discount || 0,
+                            selectedItem.gst,
+                            selectedItem.priceIncludesGst || false
+                          )
                         )}
                       </p>
                     </div>
@@ -733,7 +800,14 @@ export default function CatalogApproval() {
                   <div>
                     <Label className="text-muted-foreground">Final Price</Label>
                     <p className="font-medium text-lg">
-                      {formatCurrency(computeDiscountedExclusive(selectedItem.price, selectedItem.discount || 0))}
+                      {formatCurrency(
+                        computeDiscountedExclusive(
+                          selectedItem.price,
+                          selectedItem.discount || 0,
+                          0,
+                          selectedItem.priceIncludesGst || false
+                        )
+                      )}
                     </p>
                   </div>
                 )}
@@ -763,7 +837,7 @@ export default function CatalogApproval() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Modal - with priceIncludesGst checkbox and preview (no toggle) */}
+      {/* Edit Modal - already correct */}
       <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
@@ -857,7 +931,6 @@ export default function CatalogApproval() {
                 </div>
               </div>
 
-              {/* Price includes GST checkbox */}
               <div className="flex items-center space-x-2">
                 <Checkbox
                   id="priceIncludesGst"
@@ -886,7 +959,6 @@ export default function CatalogApproval() {
                 </Label>
               </div>
 
-              {/* Preview block - always shows discount first, then GST */}
               <div className="bg-muted/30 rounded-lg p-3 border border-border space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Base Price (excl. GST)</span>

@@ -29,7 +29,7 @@ interface AdminCatalogItem {
   category: string;
   shortDescription?: string;
   description?: string;
-  price: number;               // stored according to priceIncludesGst
+  price: number;               // base price, GST is calculated separately
   discount?: number;
   gst?: number;
   isCustomized?: boolean;
@@ -40,53 +40,70 @@ interface AdminCatalogItem {
   galleryImages?: string[];
   createdAt?: string;
   updatedAt?: string;
-  priceIncludesGst?: boolean;  // true = price already includes GST, false = price is exclusive
+  priceIncludesGst?: boolean;  // legacy field, kept for old data compatibility
 }
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(value);
 
-// Convert stored price to exclusive price (if needed)
-const getExclusivePriceFromStored = (storedPrice: number, gstPercent: number, priceIncludesGst: boolean): number => {
-  if (priceIncludesGst && gstPercent > 0) {
-    return storedPrice / (1 + gstPercent / 100);
-  }
-  return storedPrice;
+// Base price should always remain unchanged.
+// Example: price 100, discount 5%, GST 18%
+// Base Price = 100
+// Discount Amount = 5
+// Discounted Price = 95
+// GST Amount = 17.10
+// Final Price incl. GST = 112.10
+const computeDiscountAmount = (
+  basePrice: number,
+  discountPercent: number = 0
+): number => {
+  return basePrice * (discountPercent / 100);
+};
+
+const computeDiscountedPrice = (
+  basePrice: number,
+  discountPercent: number = 0
+): number => {
+  return basePrice - computeDiscountAmount(basePrice, discountPercent);
+};
+
+const computeGstAmount = (
+  discountedPrice: number,
+  gstPercent: number = 0
+): number => {
+  return discountedPrice * (gstPercent / 100);
 };
 
 // Compute final inclusive price after discount and GST
 const computeFinalInclusive = (
-  storedPrice: number,
+  basePrice: number,
   discountPercent: number = 0,
-  gstPercent: number = 0,
-  priceIncludesGst: boolean = false
+  gstPercent: number = 0
 ): number => {
-  const exclusive = getExclusivePriceFromStored(storedPrice, gstPercent, priceIncludesGst);
-  const discountedExclusive = exclusive * (1 - discountPercent / 100);
-  return discountedExclusive * (1 + gstPercent / 100);
+  const discountedPrice = computeDiscountedPrice(basePrice, discountPercent);
+  return discountedPrice + computeGstAmount(discountedPrice, gstPercent);
 };
 
-// Compute original inclusive price (without discount) for strikethrough
+// Original price including GST before discount, used for strike-through
 const computeOriginalInclusive = (
-  storedPrice: number,
-  gstPercent: number = 0,
-  priceIncludesGst: boolean = false
+  basePrice: number,
+  gstPercent: number = 0
 ): number => {
-  if (priceIncludesGst) {
-    return storedPrice; // already inclusive
-  }
-  return storedPrice * (1 + gstPercent / 100);
+  return basePrice + computeGstAmount(basePrice, gstPercent);
 };
 
-// Compute discounted exclusive (for view modal)
-const computeDiscountedExclusive = (
-  storedPrice: number,
+// Card/display final price.
+// Base price is always the entered price and should be shown as strike-through when discounted.
+// If product price already includes GST, do not add GST again.
+const computeDisplayFinalPrice = (
+  basePrice: number,
   discountPercent: number = 0,
   gstPercent: number = 0,
   priceIncludesGst: boolean = false
 ): number => {
-  const exclusive = getExclusivePriceFromStored(storedPrice, gstPercent, priceIncludesGst);
-  return exclusive * (1 - discountPercent / 100);
+  const discountedPrice = computeDiscountedPrice(basePrice, discountPercent);
+  if (priceIncludesGst || gstPercent <= 0) return discountedPrice;
+  return discountedPrice + computeGstAmount(discountedPrice, gstPercent);
 };
 
 const apiRequest = async (method: string, endpoint: string, data?: any) => {
@@ -178,7 +195,6 @@ export default function CatalogApproval() {
 
   const openEdit = (item: AdminCatalogItem) => {
     setSelectedItem(item);
-    const priceIncludesGst = item.priceIncludesGst || false;
     setEditForm({
       productName: item.productName || "",
       price: String(item.price ?? ""),
@@ -190,7 +206,7 @@ export default function CatalogApproval() {
       discount: item.discount?.toString() ?? "0",
       gst: item.gst?.toString() ?? "0",
       isCustomized: item.isCustomized ?? false,
-      priceIncludesGst,
+      priceIncludesGst: item.priceIncludesGst ?? false,
     });
     setEditModalOpen(true);
   };
@@ -289,10 +305,6 @@ export default function CatalogApproval() {
     }
   };
 
-  const getExclusivePrice = (inclusivePrice: number, gstPercent: number): number => {
-    return inclusivePrice / (1 + gstPercent / 100);
-  };
-
   const saveEdit = async () => {
     if (!selectedItem) return;
 
@@ -335,12 +347,9 @@ export default function CatalogApproval() {
       return;
     }
 
-    let finalStoredPrice = priceNum;
-    if (editForm.priceIncludesGst && gstNum > 0) {
-      // Convert inclusive to exclusive for storage
-      finalStoredPrice = priceNum / (1 + gstNum / 100);
-      finalStoredPrice = Math.round(finalStoredPrice * 100) / 100;
-    }
+    // IMPORTANT: keep base price unchanged.
+    // Do not convert price based on GST. Store the entered price as the base price.
+    const finalStoredPrice = priceNum;
 
     try {
       setSaving(true);
@@ -356,7 +365,7 @@ export default function CatalogApproval() {
         discount: discountNum,
         gst: gstNum,
         isCustomized: editForm.isCustomized,
-        priceIncludesGst: editForm.priceIncludesGst, // store the flag
+        priceIncludesGst: editForm.priceIncludesGst, // base price is always stored as entered; this flag only controls GST segregation
       };
 
       const data = await apiRequest(
@@ -423,36 +432,58 @@ export default function CatalogApproval() {
     }
   };
 
-  // Edit modal preview calculations (already correct, using the flag)
-  const getEditExclusivePrice = (): number | null => {
+  // Edit modal preview calculations - base price is never changed
+  const getEditBasePrice = (): number | null => {
     const price = parseFloat(editForm.price);
-    const gst = parseFloat(editForm.gst);
-    if (isNaN(price) || isNaN(gst)) return null;
-    if (editForm.priceIncludesGst && gst > 0) {
-      return price / (1 + gst / 100);
-    }
+    if (isNaN(price)) return null;
     return price;
   };
 
-  const getEditDiscountedExclusive = (): number | null => {
-    const exclusive = getEditExclusivePrice();
+  const getEditDiscountAmount = (): number | null => {
+    const base = getEditBasePrice();
     const discount = parseFloat(editForm.discount);
-    if (exclusive === null || isNaN(discount)) return null;
-    return exclusive * (1 - discount / 100);
+    if (base === null || isNaN(discount)) return null;
+    return computeDiscountAmount(base, discount);
   };
 
-  const getEditGstAmountOnDiscounted = (): number | null => {
-    const discountedExclusive = getEditDiscountedExclusive();
+  const getEditDiscountedPrice = (): number | null => {
+    const base = getEditBasePrice();
+    const discount = parseFloat(editForm.discount);
+    if (base === null || isNaN(discount)) return null;
+    return computeDiscountedPrice(base, discount);
+  };
+
+  const getEditTaxableValue = (): number | null => {
+    const discountedPrice = getEditDiscountedPrice();
     const gst = parseFloat(editForm.gst);
-    if (discountedExclusive === null || isNaN(gst)) return null;
-    return discountedExclusive * (gst / 100);
+    if (discountedPrice === null || isNaN(gst)) return null;
+
+    if (editForm.priceIncludesGst && gst > 0) {
+      return discountedPrice / (1 + gst / 100);
+    }
+
+    return discountedPrice;
+  };
+
+  const getEditGstAmount = (): number | null => {
+    const discountedPrice = getEditDiscountedPrice();
+    const taxableValue = getEditTaxableValue();
+    const gst = parseFloat(editForm.gst);
+    if (discountedPrice === null || taxableValue === null || isNaN(gst)) return null;
+
+    if (editForm.priceIncludesGst && gst > 0) {
+      return discountedPrice - taxableValue;
+    }
+
+    return computeGstAmount(discountedPrice, gst);
   };
 
   const getEditFinalInclusive = (): number | null => {
-    const discountedExclusive = getEditDiscountedExclusive();
-    const gst = parseFloat(editForm.gst);
-    if (discountedExclusive === null || isNaN(gst)) return null;
-    return discountedExclusive * (1 + gst / 100);
+    const discountedPrice = getEditDiscountedPrice();
+    const gstAmount = getEditGstAmount();
+    if (discountedPrice === null || gstAmount === null) return null;
+
+    return editForm.priceIncludesGst ? discountedPrice : discountedPrice + gstAmount;
   };
 
   if (loading) {
@@ -514,14 +545,9 @@ export default function CatalogApproval() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filtered.map((item) => {
-            const finalInclusive = computeFinalInclusive(
+            const finalInclusive = computeDisplayFinalPrice(
               item.price,
               item.discount || 0,
-              item.gst || 0,
-              item.priceIncludesGst || false
-            );
-            const originalInclusive = computeOriginalInclusive(
-              item.price,
               item.gst || 0,
               item.priceIncludesGst || false
             );
@@ -564,7 +590,7 @@ export default function CatalogApproval() {
                       </span>
                       {hasDiscount && (
                         <span className="ml-2 text-xs line-through text-muted-foreground">
-                          {formatCurrency(originalInclusive)}
+                          {formatCurrency(item.price)}
                         </span>
                       )}
                     </div>
@@ -579,7 +605,7 @@ export default function CatalogApproval() {
                   )}
                   {item.gst && item.gst > 0 && (
                     <p className="text-xs text-muted-foreground mb-3">
-                      GST: {item.gst}% (included in final price)
+                      GST: {item.gst}% {item.priceIncludesGst ? "already included" : "added in final price"}
                     </p>
                   )}
                   {item.isCustomized && (
@@ -684,7 +710,7 @@ export default function CatalogApproval() {
         </DialogContent>
       </Dialog>
 
-      {/* View Modal - using correct priceIncludesGst flag */}
+      {/* View Modal */}
       <Dialog open={viewModalOpen} onOpenChange={setViewModalOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
@@ -725,22 +751,18 @@ export default function CatalogApproval() {
                   <p className="font-medium">{selectedItem.category}</p>
                 </div>
                 <div>
-                  <Label className="text-muted-foreground">Stored Price</Label>
+                  <Label className="text-muted-foreground">Base Price</Label>
                   <p className="font-medium">
                     {formatCurrency(selectedItem.price)}
-                    {selectedItem.priceIncludesGst && (
-                      <span className="text-xs text-muted-foreground ml-1">(incl. GST)</span>
-                    )}
                   </p>
                 </div>
                 <div>
-                  <Label className="text-muted-foreground">Exclusive Price (base)</Label>
+                  <Label className="text-muted-foreground">Discounted Price</Label>
                   <p className="font-medium">
                     {formatCurrency(
-                      getExclusivePriceFromStored(
+                      computeDiscountedPrice(
                         selectedItem.price,
-                        selectedItem.gst || 0,
-                        selectedItem.priceIncludesGst || false
+                        selectedItem.discount || 0
                       )
                     )}
                   </p>
@@ -752,14 +774,12 @@ export default function CatalogApproval() {
                       <p className="font-medium text-success">{selectedItem.discount}%</p>
                     </div>
                     <div>
-                      <Label className="text-muted-foreground">Discounted Price (excl. GST)</Label>
+                      <Label className="text-muted-foreground">Discount Amount</Label>
                       <p className="font-medium">
                         {formatCurrency(
-                          computeDiscountedExclusive(
+                          computeDiscountAmount(
                             selectedItem.price,
-                            selectedItem.discount,
-                            selectedItem.gst || 0,
-                            selectedItem.priceIncludesGst || false
+                            selectedItem.discount
                           )
                         )}
                       </p>
@@ -772,12 +792,13 @@ export default function CatalogApproval() {
                       <Label className="text-muted-foreground">GST ({selectedItem.gst}%)</Label>
                       <p className="font-medium">
                         {formatCurrency(
-                          computeDiscountedExclusive(
-                            selectedItem.price,
-                            selectedItem.discount || 0,
-                            selectedItem.gst,
-                            selectedItem.priceIncludesGst || false
-                          ) * (selectedItem.gst / 100)
+                          computeGstAmount(
+                            computeDiscountedPrice(
+                              selectedItem.price,
+                              selectedItem.discount || 0
+                            ),
+                            selectedItem.gst
+                          )
                         )}
                       </p>
                     </div>
@@ -785,7 +806,7 @@ export default function CatalogApproval() {
                       <Label className="text-muted-foreground">Final Price (incl. GST)</Label>
                       <p className="font-medium text-lg">
                         {formatCurrency(
-                          computeFinalInclusive(
+                          computeDisplayFinalPrice(
                             selectedItem.price,
                             selectedItem.discount || 0,
                             selectedItem.gst,
@@ -801,11 +822,9 @@ export default function CatalogApproval() {
                     <Label className="text-muted-foreground">Final Price</Label>
                     <p className="font-medium text-lg">
                       {formatCurrency(
-                        computeDiscountedExclusive(
+                        computeDiscountedPrice(
                           selectedItem.price,
-                          selectedItem.discount || 0,
-                          0,
-                          selectedItem.priceIncludesGst || false
+                          selectedItem.discount || 0
                         )
                       )}
                     </p>
@@ -931,7 +950,7 @@ export default function CatalogApproval() {
                 </div>
               </div>
 
-              <div className="flex items-center space-x-2">
+              <div className="flex items-start space-x-2 rounded-lg border border-border bg-muted/20 p-3">
                 <Checkbox
                   id="priceIncludesGst"
                   checked={editForm.priceIncludesGst}
@@ -940,9 +959,14 @@ export default function CatalogApproval() {
                   }
                   disabled={saving}
                 />
-                <Label htmlFor="priceIncludesGst" className="cursor-pointer">
-                  The price I entered already includes GST
-                </Label>
+                <div className="space-y-1 leading-none">
+                  <Label htmlFor="priceIncludesGst" className="cursor-pointer">
+                    Product price already includes GST
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Base price will remain exactly as entered. GST will only be separated in the preview.
+                  </p>
+                </div>
               </div>
 
               <div className="flex items-center space-x-2">
@@ -961,49 +985,62 @@ export default function CatalogApproval() {
 
               <div className="bg-muted/30 rounded-lg p-3 border border-border space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Base Price (excl. GST)</span>
+                  <span className="text-muted-foreground">Base Price</span>
                   <span className="font-medium">
-                    {getEditExclusivePrice() !== null ? formatCurrency(getEditExclusivePrice()!) : "—"}
+                    {getEditBasePrice() !== null ? formatCurrency(getEditBasePrice()!) : "—"}
                   </span>
                 </div>
+
                 {parseFloat(editForm.discount) > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">After {editForm.discount}% discount (excl. GST)</span>
-                    <span className="font-medium">
-                      {getEditDiscountedExclusive() !== null ? formatCurrency(getEditDiscountedExclusive()!) : "—"}
-                    </span>
-                  </div>
-                )}
-                {parseFloat(editForm.gst) > 0 && (
                   <>
                     <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">GST Amount ({editForm.gst}% on discounted price)</span>
+                      <span className="text-muted-foreground">
+                        Discount Amount ({editForm.discount}%)
+                      </span>
                       <span className="font-medium">
-                        {getEditGstAmountOnDiscounted() !== null ? formatCurrency(getEditGstAmountOnDiscounted()!) : "—"}
+                        {getEditDiscountAmount() !== null ? formatCurrency(getEditDiscountAmount()!) : "—"}
                       </span>
                     </div>
-                    <div className="flex justify-between text-sm font-bold pt-1 border-t border-border/50">
-                      <span>Final Price (incl. GST)</span>
-                      <span>
-                        {getEditFinalInclusive() !== null ? formatCurrency(getEditFinalInclusive()!) : "—"}
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">After Discount</span>
+                      <span className="font-medium">
+                        {getEditDiscountedPrice() !== null ? formatCurrency(getEditDiscountedPrice()!) : "—"}
                       </span>
                     </div>
                   </>
                 )}
-                {(!editForm.gst || parseFloat(editForm.gst) === 0) && (
-                  <div className="flex justify-between text-sm font-bold pt-1 border-t border-border/50">
-                    <span>Final Price</span>
-                    <span>
-                      {getEditDiscountedExclusive() !== null ? formatCurrency(getEditDiscountedExclusive()!) : "—"}
+
+                {parseFloat(editForm.gst) > 0 && editForm.priceIncludesGst && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">
+                      Taxable Value (after separating GST)
+                    </span>
+                    <span className="font-medium">
+                      {getEditTaxableValue() !== null ? formatCurrency(getEditTaxableValue()!) : "—"}
                     </span>
                   </div>
                 )}
+
+                {parseFloat(editForm.gst) > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">
+                      GST Amount ({editForm.gst}% {editForm.priceIncludesGst ? "included" : "on discounted price"})
+                    </span>
+                    <span className="font-medium">
+                      {getEditGstAmount() !== null ? formatCurrency(getEditGstAmount()!) : "—"}
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex justify-between text-sm font-bold pt-1 border-t border-border/50">
+                  <span>Final Price (incl. GST)</span>
+                  <span>
+                    {getEditFinalInclusive() !== null ? formatCurrency(getEditFinalInclusive()!) : "—"}
+                  </span>
+                </div>
+
                 <div className="text-xs text-muted-foreground pt-1">
-                  {editForm.priceIncludesGst ? (
-                    <>You entered an inclusive price. The <strong>exclusive price</strong> will be stored.</>
-                  ) : (
-                    <>You entered an exclusive price. GST will be added after discount for the final price.</>
-                  )}
+                  Base price always stays as the entered amount. If GST is included, GST is separated from the discounted price and not added again.
                 </div>
               </div>
 

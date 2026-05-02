@@ -1,411 +1,505 @@
-// src/pages/pap/vendor/VendorReports.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "@/hooks/use-toast";
-import axios from "axios";
 import {
-  BarChart3,
-  TrendingUp,
-  ShoppingCart,
-  Package,
-  Truck,
-  History,
-  Ticket,
-  Download,
-  Search,
-  CalendarDays,
-  BadgeCheck,
-  AlertTriangle,
-  Wallet,
-} from "lucide-react";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Search, RefreshCw, Download, Loader2, Eye, FileText, ImageIcon, File } from "lucide-react";
 
-/**
- * Vendor Reports (Real-time)
- * Admin view: shows reports for ALL vendors with selector
- */
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "https://api.jsgallor.com";
 
-type ActivityType = "info" | "good" | "warn";
-
-type VendorReportItem = {
-  vendor: {
+// Expanded Estimation type to include all document fields and nested sections
+type Estimation = {
+  _id: string;
+  projectName: string;
+  clientName: string;
+  location: string;
+  estimatedCost: number;
+  step: string;
+  vendorId?: {
     _id: string;
-    name: string;
+    businessName: string;
+    vendorName: string;
     email?: string;
-    status?: string;
-    isVerified?: boolean;
-    createdAt?: string;
+    phone?: string;
   };
-
-  rangeLabel: string;
-
-  totalOrders: number;
-  totalRevenue: number;
-  estEarnings: number;
-  totalItems: number;
-
-  byStatus: Record<
-    "pending" | "approved" | "packed" | "shipped" | "in_transit" | "delivered" | "cancelled",
-    number
-  >;
-
-  activeTickets: number;
-  resolvedTickets: number;
-
-  returnRequests: number;
-  damageReports: number;
-
-  topProducts: Array<{ name: string; orders: number; revenue: number }>;
-  recentActivity: Array<{ label: string; at: string; type: ActivityType }>;
+  createdAt: string;
+  updatedAt: string;
+  description?: string;
+  servicesOffered?: string;
+  // Nested sections
+  userDetails?: {
+    clientName?: string;
+    companyName?: string;
+    phone?: string;
+    email?: string;
+    address?: string;
+  };
+  quotationDetails?: {
+    quotationNumber?: string;
+    quotationDate?: string;
+    validTill?: string;
+    quotationAmount?: number;
+    notes?: string;
+  };
+  finalOrder?: {
+    updatedDetails?: string;
+    currentStage?: string;
+    estimationCost?: number;
+    description?: string;
+    stages?: string;
+  };
+  updatesSection?: {
+    updateType?: string;
+    progressTitle?: string;
+    progressNote?: string;
+    nextAction?: string;
+    followUpDate?: string;
+    progressPercent?: number;
+  };
+  closingSection?: {
+    closingSummary?: string;
+    closingRequirements?: string;
+    currentStage?: string;
+    handoverDone?: boolean;
+    paymentClosed?: boolean;
+    clientApproved?: boolean;
+    supportShared?: boolean;
+  };
+  // File fields
+  estimationDocument?: string;
+  quotationDocument?: string;
+  finalOrderImages?: string[];
+  updateAttachments?: string[];
+  closingImages?: string[];
 };
 
-const fmtCurrency = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
-const fmtNumber = (n: number) => Number(n || 0).toLocaleString("en-IN");
-const fmtDate = (iso: string) => new Date(iso).toLocaleString();
+async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = localStorage.getItem("token");
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.message || "Request failed");
+  return data as T;
+}
 
-function badgeVariant(kind: "good" | "warn" | "bad" | "neutral") {
-  if (kind === "good") return "default";
-  if (kind === "warn") return "secondary";
-  if (kind === "bad") return "destructive";
-  return "outline";
+function getFileUrl(filePath: string) {
+  if (!filePath) return "";
+  if (filePath.startsWith("http")) return filePath;
+  // Remove leading 'uploads/' if present and serve from base URL
+  const clean = filePath.replace(/^uploads[\\/]/, "");
+  return `${API_BASE}/uploads/${clean}`;
+}
+
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleString();
 }
 
 export default function VendorReports() {
-  const [q, setQ] = useState("");
-  const [days, setDays] = useState(30);
+  const [estimations, setEstimations] = useState<Estimation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [selectedEst, setSelectedEst] = useState<Estimation | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
-  const [reports, setReports] = useState<VendorReportItem[]>([]);
-  const [selectedId, setSelectedId] = useState<string>("");
-
-  const token = localStorage.getItem("token");
-  const API = import.meta.env.VITE_API_URL || "https://api.jsgallor.com";
-
-  const fetchReports = async () => {
+  const fetchEstimations = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const res = await axios.get(`${API}/api/admin/reports/vendors?days=${days}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
-
-      const list: VendorReportItem[] = res.data?.data || [];
-      setReports(list);
-
-      if (!selectedId && list.length > 0) setSelectedId(list[0].vendor._id);
-    } catch (e) {
-      toast({
-        title: "Error",
-        description: "Failed to load vendor reports",
-        variant: "destructive",
-      });
+      const res = await api<any>("/api/admin/estimations");
+      const list = Array.isArray(res) ? res : res.estimations || [];
+      setEstimations(list);
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+      setEstimations([]);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchReports();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [days]);
+    fetchEstimations();
+  }, []);
 
-  const selected = useMemo(() => {
-    return reports.find((r) => r.vendor._id === selectedId) || null;
-  }, [reports, selectedId]);
-
-  const kpis = useMemo(() => {
-    if (!selected) return [];
-
-    const all = [
-      { key: "orders", title: "Total Orders", value: fmtNumber(selected.totalOrders), icon: ShoppingCart },
-      { key: "revenue", title: "Total Revenue", value: fmtCurrency(selected.totalRevenue), icon: TrendingUp },
-      { key: "earnings", title: "Estimated Earnings", value: fmtCurrency(selected.estEarnings), icon: Wallet },
-      { key: "items", title: "Items Sold", value: fmtNumber(selected.totalItems), icon: Package },
-
-      { key: "delivered", title: "Delivered", value: fmtNumber(selected.byStatus.delivered), icon: Truck },
-      { key: "in_transit", title: "In Transit", value: fmtNumber(selected.byStatus.in_transit), icon: Truck },
-      { key: "approved", title: "Approved", value: fmtNumber(selected.byStatus.approved), icon: BadgeCheck },
-      { key: "pending", title: "Pending", value: fmtNumber(selected.byStatus.pending), icon: AlertTriangle },
-
-      { key: "tickets", title: "Active Tickets", value: fmtNumber(selected.activeTickets), icon: Ticket },
-      { key: "resolved", title: "Resolved Tickets", value: fmtNumber(selected.resolvedTickets), icon: Ticket },
-
-      { key: "returns", title: "Return Requests", value: fmtNumber(selected.returnRequests), icon: History },
-      { key: "damage", title: "Damage Reports", value: fmtNumber(selected.damageReports), icon: History },
-    ];
-
-    const query = q.trim().toLowerCase();
-    if (!query) return all;
-    return all.filter((x) => x.title.toLowerCase().includes(query) || x.key.includes(query));
-  }, [selected, q]);
+  const filtered = useMemo(() => {
+    let result = [...estimations];
+    if (statusFilter !== "all") {
+      result = result.filter((e) => e.step === statusFilter);
+    }
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      result = result.filter(
+        (e) =>
+          e.projectName?.toLowerCase().includes(term) ||
+          e.clientName?.toLowerCase().includes(term) ||
+          e.location?.toLowerCase().includes(term) ||
+          e.vendorId?.businessName?.toLowerCase().includes(term) ||
+          e.vendorId?.vendorName?.toLowerCase().includes(term)
+      );
+    }
+    return result;
+  }, [estimations, searchTerm, statusFilter]);
 
   const exportCSV = () => {
-    if (!selected) return;
-
-    const rows: Array<[string, string | number]> = [
-      ["Vendor", selected.vendor.name],
-      ["Range", selected.rangeLabel],
-      ["Total Orders", selected.totalOrders],
-      ["Total Revenue", selected.totalRevenue],
-      ["Estimated Earnings", selected.estEarnings],
-      ["Items Sold", selected.totalItems],
-      ["Active Tickets", selected.activeTickets],
-      ["Resolved Tickets", selected.resolvedTickets],
-      ["Return Requests", selected.returnRequests],
-      ["Damage Reports", selected.damageReports],
-      ...Object.entries(selected.byStatus).map(([k, v]) => [`Orders: ${k}`, v]),
+    if (!filtered.length) return;
+    const headers = [
+      "Project Name",
+      "Client Name",
+      "Location",
+      "Estimated Cost (₹)",
+      "Step",
+      "Vendor",
+      "Created At",
+      "Updated At",
     ];
-
-    const csv = rows
-      .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const rows = filtered.map((e) => [
+      e.projectName,
+      e.clientName,
+      e.location,
+      e.estimatedCost,
+      e.step,
+      e.vendorId?.businessName || e.vendorId?.vendorName || "N/A",
+      new Date(e.createdAt).toLocaleDateString(),
+      new Date(e.updatedAt).toLocaleDateString(),
+    ]);
+    const csvContent = [headers, ...rows].map((row) => row.join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `vendor-report-${selected.vendor.name}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `estimations-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-
-    toast({ title: "Exported", description: "Vendor report exported as CSV." });
+    toast({ title: "Exported", description: "CSV downloaded." });
   };
 
-  const openTicketsBadge =
-    (selected?.activeTickets ?? 0) <= 5 ? "good" : (selected?.activeTickets ?? 0) <= 15 ? "warn" : "bad";
-  const returnsBadge =
-    (selected?.returnRequests ?? 0) <= 5 ? "good" : (selected?.returnRequests ?? 0) <= 15 ? "warn" : "bad";
+  const stepColors: Record<string, string> = {
+    Estimation: "bg-blue-100 text-blue-800",
+    Quotation: "bg-yellow-100 text-yellow-800",
+    "Final Order": "bg-purple-100 text-purple-800",
+    Update: "bg-orange-100 text-orange-800",
+    Closing: "bg-green-100 text-green-800",
+  };
+
+  const handleViewDetails = (est: Estimation) => {
+    setSelectedEst(est);
+    setDetailsOpen(true);
+  };
+
+  const renderFileList = (files: string[] | undefined, title: string) => {
+    if (!files || files.length === 0) return null;
+    return (
+      <div className="mt-4">
+        <p className="font-semibold text-sm text-muted-foreground">{title}</p>
+        <div className="flex flex-wrap gap-2 mt-2">
+          {files.map((file, idx) => {
+            const url = getFileUrl(file);
+            const fileName = file.split("/").pop() || file;
+            return (
+              <a
+                key={idx}
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 px-2 py-1 text-xs bg-muted rounded-md hover:bg-muted/80"
+              >
+                <FileText className="h-3 w-3" />
+                {fileName}
+              </a>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <AdminLayout panelType="pap-vendor">
-      <div className="p-6 space-y-6">
-        {/* Header */}
+    <AdminLayout panelType="pap-vendor" title="All Estimations" subtitle="View all vendor estimations with full details and documents">
+      <div className="space-y-6 p-6">
+        {/* Toolbar */}
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <BarChart3 className="h-6 w-6" />
-              <h1 className="text-2xl font-bold">Vendor Reports</h1>
+          <div className="flex flex-1 gap-2">
+            <div className="relative w-full md:w-80">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search by project, client, location, vendor..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-8"
+              />
             </div>
-
-            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-              <CalendarDays className="h-4 w-4" />
-              <span>{selected?.rangeLabel || `Last ${days} days`}</span>
-              {!!selected && (
-                <>
-                  <Badge variant={badgeVariant(openTicketsBadge) as any}>
-                    Active Tickets: {selected.activeTickets}
-                  </Badge>
-                  <Badge variant={badgeVariant(returnsBadge) as any}>
-                    Returns: {selected.returnRequests}
-                  </Badge>
-                </>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
             <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
               className="h-10 rounded-md border bg-background px-3 text-sm"
-              value={days}
-              onChange={(e) => setDays(Number(e.target.value))}
             >
-              <option value={7}>Last 7 days</option>
-              <option value={30}>Last 30 days</option>
-              <option value={90}>Last 90 days</option>
-              <option value={180}>Last 180 days</option>
+              <option value="all">All Steps</option>
+              <option value="Estimation">Estimation</option>
+              <option value="Quotation">Quotation</option>
+              <option value="Final Order">Final Order</option>
+              <option value="Update">Update</option>
+              <option value="Closing">Closing</option>
             </select>
-
-            <Button variant="outline" onClick={fetchReports} disabled={loading}>
-              {loading ? "Loading..." : "Refresh"}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={fetchEstimations} disabled={loading}>
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              <span className="ml-2">Refresh</span>
             </Button>
-
-            <Button variant="outline" onClick={exportCSV} disabled={!selected}>
+            <Button variant="outline" onClick={exportCSV} disabled={filtered.length === 0}>
               <Download className="h-4 w-4 mr-2" />
               Export CSV
             </Button>
           </div>
         </div>
 
-        {/* Vendor Selector */}
+        {/* Table */}
         <Card>
-          <CardContent className="p-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="text-sm text-muted-foreground">Select Vendor</div>
-
-            <select
-              className="h-10 w-full md:w-[420px] rounded-md border bg-background px-3 text-sm"
-              value={selectedId}
-              onChange={(e) => setSelectedId(e.target.value)}
-            >
-              {reports.length === 0 ? (
-                <option value="">No vendors</option>
-              ) : (
-                reports.map((r) => (
-                  <option key={r.vendor._id} value={r.vendor._id}>
-                    {r.vendor.name} {r.vendor.isVerified ? "✅" : ""} {r.vendor.status ? `(${r.vendor.status})` : ""}
-                  </option>
-                ))
-              )}
-            </select>
-          </CardContent>
-        </Card>
-
-        {/* Search KPI */}
-        <Card>
-          <CardContent className="p-4">
-            <div className="relative w-full max-w-md">
-              <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
-              <Input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Search inside report cards..."
-                className="pl-9"
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {loading ? (
-          <Card>
-            <CardContent className="p-6 text-sm text-muted-foreground">Loading reports...</CardContent>
-          </Card>
-        ) : !selected ? (
-          <Card>
-            <CardContent className="p-6 text-sm text-muted-foreground">No report selected.</CardContent>
-          </Card>
-        ) : (
-          <>
-            {/* KPIs */}
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {kpis.map((k) => (
-                <KpiCard key={k.key} icon={k.icon} title={k.title} value={k.value} />
-              ))}
-            </div>
-
-            {/* Sections */}
-            <div className="grid gap-4 lg:grid-cols-2">
-              {/* Orders by Status */}
-              <Card>
-                <CardContent className="p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="font-semibold">Fulfillment Status</div>
-                    <Badge variant="outline">Total: {fmtNumber(selected.totalOrders)}</Badge>
-                  </div>
-
-                  <div className="space-y-2">
-                    {Object.entries(selected.byStatus).map(([k, v]) => {
-                      const label = k.replaceAll("_", " ");
-                      const percent = selected.totalOrders ? (v / selected.totalOrders) * 100 : 0;
-                      return (
-                        <div key={k} className="space-y-1">
-                          <div className="flex items-center justify-between text-sm">
-                            <span className="capitalize">{label}</span>
-                            <span className="text-muted-foreground">
-                              {fmtNumber(v)} • {percent.toFixed(1)}%
-                            </span>
-                          </div>
-                          <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-                            <div
-                              className="h-full bg-foreground/60"
-                              style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Top Products */}
-              <Card>
-                <CardContent className="p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="font-semibold">Top Products</div>
-                    <Badge variant="outline">By Revenue</Badge>
-                  </div>
-
-                  {(selected.topProducts || []).length === 0 ? (
-                    <div className="text-sm text-muted-foreground">No top products yet.</div>
-                  ) : (
-                    <div className="space-y-2">
-                      {selected.topProducts.map((p) => (
-                        <div key={p.name} className="rounded-lg border p-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="font-medium">{p.name}</div>
-                            <Badge variant="secondary">{fmtCurrency(p.revenue)}</Badge>
-                          </div>
-                          <div className="mt-2 text-sm text-muted-foreground flex items-center justify-between">
-                            <span>Orders: {fmtNumber(p.orders)}</span>
-                            <span>Revenue: {fmtCurrency(p.revenue)}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Recent Activity */}
-            <Card>
-              <CardContent className="p-4 space-y-3">
-                <div className="font-semibold">Recent Activity</div>
-
-                {(selected.recentActivity || []).length === 0 ? (
-                  <div className="text-sm text-muted-foreground">No recent activity.</div>
+          <CardContent className="p-0 overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Project Name</TableHead>
+                  <TableHead>Client Name</TableHead>
+                  <TableHead>Location</TableHead>
+                  <TableHead className="text-right">Est. Cost (₹)</TableHead>
+                  <TableHead>Step</TableHead>
+                  <TableHead>Vendor</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                      Loading estimations...
+                    </TableCell>
+                  </TableRow>
+                ) : filtered.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                      No estimations found.
+                    </TableCell>
+                  </TableRow>
                 ) : (
-                  <div className="space-y-2">
-                    {selected.recentActivity.map((a, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-start justify-between gap-3 rounded-lg border p-3"
-                      >
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium truncate">{a.label}</div>
-                          <div className="text-xs text-muted-foreground">{fmtDate(a.at)}</div>
-                        </div>
-                        <Badge
-                          variant={
-                            badgeVariant(a.type === "good" ? "good" : a.type === "warn" ? "warn" : "neutral") as any
-                          }
-                        >
-                          {a.type.toUpperCase()}
+                  filtered.map((est) => (
+                    <TableRow key={est._id}>
+                      <TableCell className="font-medium">{est.projectName}</TableCell>
+                      <TableCell>{est.clientName}</TableCell>
+                      <TableCell>{est.location}</TableCell>
+                      <TableCell className="text-right">
+                        ₹{Number(est.estimatedCost).toLocaleString("en-IN")}
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={stepColors[est.step] || "bg-gray-100"}>
+                          {est.step}
                         </Badge>
-                      </div>
-                    ))}
-                  </div>
+                      </TableCell>
+                      <TableCell>
+                        {est.vendorId?.businessName || est.vendorId?.vendorName || "—"}
+                      </TableCell>
+                      <TableCell>{new Date(est.createdAt).toLocaleDateString()}</TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleViewDetails(est)}
+                          title="View Details"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
                 )}
-              </CardContent>
-            </Card>
-          </>
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+
+        {/* Summary */}
+        {!loading && filtered.length > 0 && (
+          <div className="text-sm text-muted-foreground text-right">
+            Total estimations: {filtered.length} | Total value: ₹
+            {filtered.reduce((sum, e) => sum + (Number(e.estimatedCost) || 0), 0).toLocaleString("en-IN")}
+          </div>
         )}
       </div>
-    </AdminLayout>
-  );
-}
 
-function KpiCard({
-  icon: Icon,
-  title,
-  value,
-}: {
-  icon: any;
-  title: string;
-  value: string;
-}) {
-  return (
-    <Card>
-      <CardContent className="p-4 flex items-center gap-3">
-        <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center">
-          <Icon className="h-5 w-5" />
-        </div>
-        <div className="min-w-0">
-          <div className="text-xs text-muted-foreground truncate">{title}</div>
-          <div className="text-xl font-semibold truncate">{value}</div>
-        </div>
-      </CardContent>
-    </Card>
+      {/* Details Modal */}
+      <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Estimation Details</DialogTitle>
+            <DialogDescription>
+              {selectedEst?.projectName} – {selectedEst?.clientName}
+            </DialogDescription>
+          </DialogHeader>
+          {selectedEst && (
+            <div className="space-y-6">
+              {/* Basic Info */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Project Name</p>
+                  <p>{selectedEst.projectName}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Client Name</p>
+                  <p>{selectedEst.clientName}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Location</p>
+                  <p>{selectedEst.location}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Estimated Cost</p>
+                  <p className="font-semibold">₹{Number(selectedEst.estimatedCost).toLocaleString("en-IN")}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Step</p>
+                  <Badge className={stepColors[selectedEst.step]}>{selectedEst.step}</Badge>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Vendor</p>
+                  <p>{selectedEst.vendorId?.businessName || selectedEst.vendorId?.vendorName || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Vendor Email</p>
+                  <p>{selectedEst.vendorId?.email || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Vendor Phone</p>
+                  <p>{selectedEst.vendorId?.phone || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Created At</p>
+                  <p>{formatDate(selectedEst.createdAt)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Last Updated</p>
+                  <p>{formatDate(selectedEst.updatedAt)}</p>
+                </div>
+              </div>
+
+              {selectedEst.description && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Description</p>
+                  <p>{selectedEst.description}</p>
+                </div>
+              )}
+
+              {/* User Details (nesting) */}
+              {selectedEst.userDetails && Object.keys(selectedEst.userDetails).some(k => !!selectedEst.userDetails?.[k as keyof typeof selectedEst.userDetails]) && (
+                <div>
+                  <h3 className="text-md font-semibold">User/Client Details</h3>
+                  <div className="grid grid-cols-2 gap-3 text-sm mt-2">
+                    {selectedEst.userDetails?.clientName && <div><span className="text-muted-foreground">Client:</span> {selectedEst.userDetails.clientName}</div>}
+                    {selectedEst.userDetails?.companyName && <div><span className="text-muted-foreground">Company:</span> {selectedEst.userDetails.companyName}</div>}
+                    {selectedEst.userDetails?.phone && <div><span className="text-muted-foreground">Phone:</span> {selectedEst.userDetails.phone}</div>}
+                    {selectedEst.userDetails?.email && <div><span className="text-muted-foreground">Email:</span> {selectedEst.userDetails.email}</div>}
+                    {selectedEst.userDetails?.address && <div><span className="text-muted-foreground">Address:</span> {selectedEst.userDetails.address}</div>}
+                  </div>
+                </div>
+              )}
+
+              {/* Quotation Details */}
+              {selectedEst.quotationDetails && Object.keys(selectedEst.quotationDetails).some(k => !!selectedEst.quotationDetails?.[k as keyof typeof selectedEst.quotationDetails]) && (
+                <div>
+                  <h3 className="text-md font-semibold">Quotation Details</h3>
+                  <div className="grid grid-cols-2 gap-3 text-sm mt-2">
+                    <div><span className="text-muted-foreground">Quotation #:</span> {selectedEst.quotationDetails.quotationNumber || "—"}</div>
+                    <div><span className="text-muted-foreground">Date:</span> {selectedEst.quotationDetails.quotationDate || "—"}</div>
+                    <div><span className="text-muted-foreground">Valid Till:</span> {selectedEst.quotationDetails.validTill || "—"}</div>
+                    <div><span className="text-muted-foreground">Amount:</span> ₹{Number(selectedEst.quotationDetails.quotationAmount || 0).toLocaleString()}</div>
+                    {selectedEst.quotationDetails.notes && <div className="col-span-2"><span className="text-muted-foreground">Notes:</span> {selectedEst.quotationDetails.notes}</div>}
+                  </div>
+                </div>
+              )}
+
+              {/* Final Order */}
+              {selectedEst.finalOrder && Object.keys(selectedEst.finalOrder).some(k => !!selectedEst.finalOrder?.[k as keyof typeof selectedEst.finalOrder]) && (
+                <div>
+                  <h3 className="text-md font-semibold">Final Order</h3>
+                  <div className="grid grid-cols-2 gap-3 text-sm mt-2">
+                    <div><span className="text-muted-foreground">Updated Details:</span> {selectedEst.finalOrder.updatedDetails || "—"}</div>
+                    <div><span className="text-muted-foreground">Current Stage:</span> {selectedEst.finalOrder.currentStage || "—"}</div>
+                    <div><span className="text-muted-foreground">Estimation Cost:</span> ₹{Number(selectedEst.finalOrder.estimationCost || 0).toLocaleString()}</div>
+                    <div><span className="text-muted-foreground">Stages:</span> {selectedEst.finalOrder.stages || "—"}</div>
+                    {selectedEst.finalOrder.description && <div className="col-span-2"><span className="text-muted-foreground">Description:</span> {selectedEst.finalOrder.description}</div>}
+                  </div>
+                </div>
+              )}
+
+              {/* Updates Section */}
+              {selectedEst.updatesSection && Object.keys(selectedEst.updatesSection).some(k => !!selectedEst.updatesSection?.[k as keyof typeof selectedEst.updatesSection]) && (
+                <div>
+                  <h3 className="text-md font-semibold">Updates</h3>
+                  <div className="grid grid-cols-2 gap-3 text-sm mt-2">
+                    <div><span className="text-muted-foreground">Update Type:</span> {selectedEst.updatesSection.updateType || "—"}</div>
+                    <div><span className="text-muted-foreground">Progress Title:</span> {selectedEst.updatesSection.progressTitle || "—"}</div>
+                    <div><span className="text-muted-foreground">Next Action:</span> {selectedEst.updatesSection.nextAction || "—"}</div>
+                    <div><span className="text-muted-foreground">Follow-up Date:</span> {selectedEst.updatesSection.followUpDate || "—"}</div>
+                    <div><span className="text-muted-foreground">Progress %:</span> {selectedEst.updatesSection.progressPercent || 0}%</div>
+                    {selectedEst.updatesSection.progressNote && <div className="col-span-2"><span className="text-muted-foreground">Note:</span> {selectedEst.updatesSection.progressNote}</div>}
+                  </div>
+                </div>
+              )}
+
+              {/* Closing Section */}
+              {selectedEst.closingSection && (Object.keys(selectedEst.closingSection).some(k => !!selectedEst.closingSection?.[k as keyof typeof selectedEst.closingSection]) ) && (
+                <div>
+                  <h3 className="text-md font-semibold">Closing Information</h3>
+                  <div className="grid grid-cols-2 gap-3 text-sm mt-2">
+                    <div><span className="text-muted-foreground">Current Stage:</span> {selectedEst.closingSection.currentStage || "—"}</div>
+                    <div><span className="text-muted-foreground">Closing Requirements:</span> {selectedEst.closingSection.closingRequirements || "—"}</div>
+                    {selectedEst.closingSection.closingSummary && <div className="col-span-2"><span className="text-muted-foreground">Summary:</span> {selectedEst.closingSection.closingSummary}</div>}
+                    <div><span className="text-muted-foreground">Handover Done:</span> {selectedEst.closingSection.handoverDone ? "✅ Yes" : "❌ No"}</div>
+                    <div><span className="text-muted-foreground">Payment Closed:</span> {selectedEst.closingSection.paymentClosed ? "✅ Yes" : "❌ No"}</div>
+                    <div><span className="text-muted-foreground">Client Approved:</span> {selectedEst.closingSection.clientApproved ? "✅ Yes" : "❌ No"}</div>
+                    <div><span className="text-muted-foreground">Support Shared:</span> {selectedEst.closingSection.supportShared ? "✅ Yes" : "❌ No"}</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Documents Section */}
+              <div>
+                <h3 className="text-md font-semibold">Attached Documents</h3>
+                {renderFileList(selectedEst.estimationDocument ? [selectedEst.estimationDocument] : [], "Estimation Document")}
+                {renderFileList(selectedEst.quotationDocument ? [selectedEst.quotationDocument] : [], "Quotation Document")}
+                {renderFileList(selectedEst.finalOrderImages, "Final Order Images")}
+                {renderFileList(selectedEst.updateAttachments, "Update Attachments")}
+                {renderFileList(selectedEst.closingImages, "Closing Images")}
+                {!selectedEst.estimationDocument && !selectedEst.quotationDocument && (!selectedEst.finalOrderImages || selectedEst.finalOrderImages.length === 0) && (!selectedEst.updateAttachments || selectedEst.updateAttachments.length === 0) && (!selectedEst.closingImages || selectedEst.closingImages.length === 0) && (
+                  <p className="text-sm text-muted-foreground">No documents attached.</p>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </AdminLayout>
   );
 }

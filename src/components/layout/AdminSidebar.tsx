@@ -83,14 +83,7 @@ const manufacturerAdminNav: NavItem[] = [
 
 const vendorAdminNav: NavItem[] = [
   { title: "Dashboard", href: "/pap/vendor", icon: LayoutDashboard },
-  {
-    title: "Approve Orders",
-    href: "/pap/vendor/orders/approve",
-    icon: ClipboardList,
-  },
-  { title: "Order History", href: "/pap/vendor/orders/history", icon: History },
-  { title: "Track Orders", href: "/pap/vendor/orders/track", icon: Truck },
-  { title: "Reports", href: "/pap/vendor/reports", icon: BarChart3 },
+  { title: "Estimates", href: "/pap/vendor/reports", icon: BarChart3 },
   { title: "Vendor List", href: "/pap/vendor/list", icon: Store },
 ];
 

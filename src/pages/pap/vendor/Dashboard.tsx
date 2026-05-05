@@ -38,7 +38,7 @@ export default function VendorDashboard() {
     const fetchVendorStats = async () => {
       try {
         setLoading(true);
-        const res = await api<any>('/api/admin/all');
+        const res = await api<any>('/api/admins/all');
         const vendors = Array.isArray(res) ? res : res.vendors || [];
         setTotalVendors(vendors.length);
         setPendingVendors(vendors.filter((v: any) => v.status === 'pending').length);

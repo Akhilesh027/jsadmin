@@ -81,7 +81,7 @@ export default function VendorList() {
     setLoading(true);
     try {
       // ✅ Updated to /api/admin/all
-      const res = await api<any>("/api/admin/all");
+      const res = await api<any>("/api/admins/all");
       const list = normalizeVendors(res);
       setVendors(list);
     } catch (err: any) {
@@ -103,7 +103,7 @@ export default function VendorList() {
   const handleApprove = async (vendor: Vendor) => {
     setActionId(vendor._id);
     try {
-      await api(`/api/admin/${vendor._id}/approve`, { method: "PATCH" });
+      await api(`/api/admins/${vendor._id}/approve`, { method: "PATCH" });
       toast({ title: "Vendor Approved", description: `${vendor.businessName} has been approved.` });
       setVendors((prev) =>
         prev.map((v) => (v._id === vendor._id ? { ...v, status: "approved" } : v))
@@ -119,7 +119,7 @@ export default function VendorList() {
     if (!window.confirm(`Delete vendor "${vendor.businessName}"?`)) return;
     setActionId(vendor._id);
     try {
-      await api(`/api/admin/${vendor._id}`, { method: "DELETE" });
+      await api(`/api/admins/${vendor._id}`, { method: "DELETE" });
       toast({ title: "Vendor Deleted", description: `${vendor.businessName} removed.` });
       setVendors((prev) => prev.filter((v) => v._id !== vendor._id));
     } catch (err: any) {

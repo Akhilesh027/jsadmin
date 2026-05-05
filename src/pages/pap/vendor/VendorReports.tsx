@@ -128,7 +128,7 @@ export default function VendorReports() {
   const fetchEstimations = async () => {
     setLoading(true);
     try {
-      const res = await api<any>("/api/admin/estimations");
+      const res = await api<any>("/api/admins/estimations");
       const list = Array.isArray(res) ? res : res.estimations || [];
       setEstimations(list);
     } catch (err: any) {

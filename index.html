@@ -1,25 +1,160 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <!-- Basic -->
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
 
-    <title>JS GALLOR – Centralised Admin Panel</title>
+    <!-- SEO -->
+    <title>JS GALLOR | Centralised Admin Panel</title>
 
-    <!-- ✅ Favicon -->
-    <link rel="icon" type="image/png" href="/public/JSGALORE.png" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta
+      name="description"
+      content="JS GALLOR centralized administrative dashboard for managing ecommerce, vendors, manufacturers, orders, analytics, and B2B/B2C operations."
+    />
 
-    <meta name="description" content="JS GALLOR multi-layer administrative ecosystem for B2B and B2C operations management" />
+    <meta
+      name="keywords"
+      content="admin panel, ecommerce dashboard, vendor management, manufacturer management, B2B dashboard, B2C admin, JS GALLOR"
+    />
+
     <meta name="author" content="Akhileshreddy" />
-    <meta property="og:title" content="JS GALLOR Admin Panel" />
-    <meta property="og:description" content="Centralised admin system for manufacturers, vendors, and ecommerce" />
+    <meta name="robots" content="index, follow" />
+
+    <!-- Canonical -->
+    <link rel="canonical" href="https://js-gallor.vercel.app/" />
+
+    <!-- Theme -->
+    <meta name="theme-color" content="#111111" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/JSGALORE.png" />
+    <link rel="apple-touch-icon" href="/JSGALORE.png" />
+
+    <!-- Open Graph -->
     <meta property="og:type" content="website" />
+
+    <meta
+      property="og:title"
+      content="JS GALLOR | Centralised Admin Dashboard"
+    />
+
+    <meta
+      property="og:description"
+      content="Advanced admin ecosystem for ecommerce operations, manufacturers, vendors, products, orders, and analytics."
+    />
+
+    <meta
+      property="og:image"
+      content="https://js-gallor.vercel.app/JSGALORE.png"
+    />
+
+    <meta property="og:url" content="https://js-gallor.vercel.app/" />
+    <meta property="og:site_name" content="JS GALLOR" />
+
+    <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
+
+    <meta
+      name="twitter:title"
+      content="JS GALLOR | Admin Panel"
+    />
+
+    <meta
+      name="twitter:description"
+      content="Centralised ecommerce administration system for vendors, manufacturers, and operations."
+    />
+
+    <meta
+      name="twitter:image"
+      content="https://js-gallor.vercel.app/JSGALORE.png"
+    />
+
+    <!-- Fonts -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@100..1000&family=Playfair+Display:wght@400..900&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Facebook Pixel -->
+    <script>
+      !function(f,b,e,v,n,t,s)
+      {
+        if(f.fbq)return;
+
+        n=f.fbq=function(){
+          n.callMethod ?
+          n.callMethod.apply(n,arguments) : n.queue.push(arguments)
+        };
+
+        if(!f._fbq)f._fbq=n;
+
+        n.push=n;
+        n.loaded=!0;
+        n.version='2.0';
+        n.queue=[];
+
+        t=b.createElement(e);
+        t.async=!0;
+        t.src=v;
+
+        s=b.getElementsByTagName(e)[0];
+        s.parentNode.insertBefore(t,s)
+
+      }(window, document,'script',
+      'https://connect.facebook.net/en_US/fbevents.js');
+
+      fbq('init', '1502374214924445');
+      fbq('track', 'PageView');
+    </script>
+
+    <!-- Google Analytics / Ads -->
+    <script
+      async
+      src="https://www.googletagmanager.com/gtag/js?id=AW-18154433902"
+    ></script>
+
+    <script>
+      window.dataLayer = window.dataLayer || [];
+
+      function gtag(){
+        dataLayer.push(arguments);
+      }
+
+      gtag('js', new Date());
+      gtag('config', 'AW-18154433902');
+    </script>
+
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "JS GALLOR Admin Panel",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Web",
+        "description": "Centralized ecommerce administration platform for managing products, vendors, manufacturers, analytics, and orders."
+      }
+    </script>
   </head>
 
   <body>
+
+    <!-- Facebook Pixel NoScript -->
+    <noscript>
+      <img
+        height="1"
+        width="1"
+        style="display:none"
+        src="https://www.facebook.com/tr?id=1502374214924445&ev=PageView&noscript=1"
+        alt="facebook-pixel"
+      />
+    </noscript>
+
     <div id="root"></div>
+
+    <!-- React Entry -->
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

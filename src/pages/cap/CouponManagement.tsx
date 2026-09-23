@@ -115,9 +115,9 @@ async function apiFetch(baseUrl: string, path: string, options: RequestInit = {}
 
 const toSegment = (website: any): Segment =>
   website === "affordable" ||
-  website === "midrange" ||
-  website === "luxury" ||
-  website === "all"
+    website === "midrange" ||
+    website === "luxury" ||
+    website === "all"
     ? website
     : "all";
 

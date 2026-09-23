@@ -278,9 +278,9 @@ const App = () => (
             }
           />
           <Route path="/cap/coupons" element={<CouponManagement />} />
-<Route path="/cap/categories" element={<CategoryManagement />} />
-<Route path="/cap/banners" element={<BannerManagement />} />
-<Route path="/cap/reports" element={<ReportsOverview/>} />
+          <Route path="/cap/categories" element={<CategoryManagement />} />
+          <Route path="/cap/banners" element={<BannerManagement />} />
+          <Route path="/cap/reports" element={<ReportsOverview />} />
 
           <Route
             path="/cap/vendors/stats"
@@ -477,9 +477,9 @@ const App = () => (
             }
           />
           <Route path="/eap/reports" element={<EcommerceReports />} />
-<Route path="/eap/legal-pages" element={<LegalPagesManager />} />
-<Route path="/admin/estimates" element={<AdminEstimates />} />
-<Route path="/admin/shipping-costs" element={<ShippingCostManagement />} />
+          <Route path="/eap/legal-pages" element={<LegalPagesManager />} />
+          <Route path="/admin/estimates" element={<AdminEstimates />} />
+          <Route path="/admin/shipping-costs" element={<ShippingCostManagement />} />
 
           <Route
             path="/eap/orders/track"

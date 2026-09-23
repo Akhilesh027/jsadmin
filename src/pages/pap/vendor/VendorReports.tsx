@@ -469,7 +469,7 @@ export default function VendorReports() {
               )}
 
               {/* Closing Section */}
-              {selectedEst.closingSection && (Object.keys(selectedEst.closingSection).some(k => !!selectedEst.closingSection?.[k as keyof typeof selectedEst.closingSection]) ) && (
+              {selectedEst.closingSection && (Object.keys(selectedEst.closingSection).some(k => !!selectedEst.closingSection?.[k as keyof typeof selectedEst.closingSection])) && (
                 <div>
                   <h3 className="text-md font-semibold">Closing Information</h3>
                   <div className="grid grid-cols-2 gap-3 text-sm mt-2">

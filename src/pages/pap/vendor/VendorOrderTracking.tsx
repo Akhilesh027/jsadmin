@@ -684,7 +684,7 @@ export default function VendorOrderTracking() {
                                 {formatCurrency(
                                   Number(
                                     item.lineTotal ??
-                                      Number(item.unitPrice || 0) * Number(item.quantity || 0)
+                                    Number(item.unitPrice || 0) * Number(item.quantity || 0)
                                   )
                                 )}
                               </div>

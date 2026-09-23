@@ -1,365 +1,601 @@
 // src/pages/admin/BannerManagement.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { AdminLayout } from "@/components/layout/AdminLayout";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/hooks/use-toast";
 import {
-  Plus,
-  Search,
+  Video,
   Image as ImageIcon,
-  Eye,
-  Pencil,
-  Trash2,
+  Upload,
+  Save,
+  CheckCircle2,
+  ExternalLink,
+  Info,
+  RefreshCw,
 } from "lucide-react";
 
-/** Simple Banner type */
-type Banner = {
-  id: string;
-  name: string;
-  navigation: string; // route/path/url
-  image?: string; // dataURL for preview (you can replace with uploaded URL later)
-  updatedAt: string;
+// Local backend port default
+const API_BASE = import.meta.env.VITE_BACKEND_URL || "https://api.jsgallor.com";
+
+interface VideoBanner {
+  videoUrl: string;
+  posterUrl?: string;
+  ctaLink?: string;
+  isActive?: boolean;
+}
+
+interface DualBannerItem {
+  bannerIndex: number;
+  imageUrl: string;
+  ctaLink?: string;
+  isActive?: boolean;
+}
+
+interface BannerConfig {
+  website: "affordable" | "midrange";
+  videoBanner: VideoBanner;
+  dualBanners: DualBannerItem[];
+}
+
+const EMPTY_CONFIG: Record<"affordable" | "midrange", BannerConfig> = {
+  affordable: {
+    website: "affordable",
+    videoBanner: {
+      videoUrl: "https://assets.mixkit.co/videos/preview/mixkit-living-room-with-a-modern-interior-design-4820-large.mp4",
+      posterUrl: "",
+      ctaLink: "/categories",
+      isActive: true,
+    },
+    dualBanners: [
+      {
+        bannerIndex: 1,
+        imageUrl: "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=1200&q=80",
+        ctaLink: "/categories/living-room",
+        isActive: true,
+      },
+      {
+        bannerIndex: 2,
+        imageUrl: "https://images.unsplash.com/photo-1617806118233-18e1de247200?w=1200&q=80",
+        ctaLink: "/categories/dining",
+        isActive: true,
+      },
+    ],
+  },
+  midrange: {
+    website: "midrange",
+    videoBanner: {
+      videoUrl: "https://assets.mixkit.co/videos/preview/mixkit-modern-apartment-living-room-interior-design-4825-large.mp4",
+      posterUrl: "",
+      ctaLink: "/products",
+      isActive: true,
+    },
+    dualBanners: [
+      {
+        bannerIndex: 1,
+        imageUrl: "https://images.unsplash.com/photo-1493663284031-b7e3aefcae8e?w=1200&q=80",
+        ctaLink: "/products",
+        isActive: true,
+      },
+      {
+        bannerIndex: 2,
+        imageUrl: "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?w=1200&q=80",
+        ctaLink: "/products",
+        isActive: true,
+      },
+    ],
+  },
 };
 
-/** seed */
-const seed: Banner[] = [
-  {
-    id: "ban_1",
-    name: "Home Hero Banner",
-    navigation: "/",
-    image:
-      "https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=1200&q=80",
-    updatedAt: new Date().toISOString(),
-  },
-];
+// Helper to detect YouTube video IDs
+const getYouTubeVideoId = (url: string): string | null => {
+  if (!url) return null;
+  const match = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})/);
+  return match ? match[1] : null;
+};
+
+// Helper to detect Vimeo video IDs
+const getVimeoVideoId = (url: string): string | null => {
+  if (!url) return null;
+  const match = url.match(/vimeo\.com\/(?:channels\/(?:\w+\/)?|groups\/([^\/]*)\/videos\/|album\/(\d+)\/video\/|video\/|)(\d+)/);
+  return match ? match[3] : null;
+};
+
+// Helper to detect Google Drive video IDs
+const getGoogleDriveVideoId = (url: string): string | null => {
+  if (!url) return null;
+  const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  return match ? match[1] : null;
+};
 
 export default function BannerManagement() {
-  const [banners, setBanners] = useState<Banner[]>(seed);
+  const [activeWebsite, setActiveWebsite] = useState<"affordable" | "midrange">("affordable");
+  const [configs, setConfigs] = useState<Record<"affordable" | "midrange", BannerConfig>>(EMPTY_CONFIG);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [uploadingIndex, setUploadingIndex] = useState<number | null>(null);
 
-  const [q, setQ] = useState("");
-
-  const [openCreate, setOpenCreate] = useState(false);
-  const [openEdit, setOpenEdit] = useState<Banner | null>(null);
-  const [openView, setOpenView] = useState<Banner | null>(null);
-
-  const filtered = useMemo(() => {
-    const query = q.trim().toLowerCase();
-    if (!query) return banners;
-    return banners.filter(
-      (b) =>
-        b.name.toLowerCase().includes(query) ||
-        b.navigation.toLowerCase().includes(query)
-    );
-  }, [banners, q]);
-
-  const onDelete = (id: string) => {
-    setBanners((p) => p.filter((b) => b.id !== id));
-    toast({ title: "Deleted", description: "Banner removed.", variant: "destructive" });
+  // Fetch banner configuration for selected website
+  const fetchBannerConfig = async (website: "affordable" | "midrange") => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/banners/${website}?t=${Date.now()}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setConfigs((prev) => ({
+          ...prev,
+          [website]: {
+            website,
+            videoBanner: {
+              videoUrl: json.data.videoBanner?.videoUrl || "",
+              posterUrl: json.data.videoBanner?.posterUrl || "",
+              ctaLink: json.data.videoBanner?.ctaLink || (website === "affordable" ? "/categories" : "/products"),
+              isActive: json.data.videoBanner?.isActive !== false,
+            },
+            dualBanners:
+              Array.isArray(json.data.dualBanners) && json.data.dualBanners.length === 2
+                ? json.data.dualBanners
+                : EMPTY_CONFIG[website].dualBanners,
+          },
+        }));
+      }
+    } catch (err: any) {
+      console.warn(`Could not load ${website} banners from local API:`, err.message);
+    } finally {
+      setLoading(false);
+    }
   };
-
-  return (
-    <AdminLayout panelType="cap">
-      <div className="p-6 space-y-6">
-        {/* Header */}
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Banner Management</h1>
-            <p className="text-sm text-muted-foreground">
-              Add banners with image, name and navigation link.
-            </p>
-          </div>
-
-          <Button onClick={() => setOpenCreate(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Add Banner
-          </Button>
-        </div>
-
-        {/* Search */}
-        <Card>
-          <CardContent className="p-4">
-            <div className="relative w-full max-w-md">
-              <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
-              <Input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Search banner name or navigation..."
-                className="pl-9"
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Table */}
-        <Card>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/40">
-                  <tr className="text-left">
-                    <Th>Banner</Th>
-                    <Th>Navigation</Th>
-                    <Th>Updated</Th>
-                    <Th className="text-right pr-4">Actions</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="p-6 text-center text-muted-foreground">
-                        No banners found.
-                      </td>
-                    </tr>
-                  ) : (
-                    filtered.map((b) => (
-                      <tr key={b.id} className="border-t">
-                        <Td>
-                          <div className="flex items-center gap-3">
-                            {b.image ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={b.image}
-                                alt={b.name}
-                                className="h-10 w-14 rounded-md object-cover border"
-                              />
-                            ) : (
-                              <div className="h-10 w-14 rounded-md border flex items-center justify-center text-muted-foreground">
-                                <ImageIcon className="h-4 w-4" />
-                              </div>
-                            )}
-                            <div>
-                              <div className="font-medium">{b.name}</div>
-                              <div className="text-xs text-muted-foreground">ID: {b.id}</div>
-                            </div>
-                          </div>
-                        </Td>
-                        <Td className="font-mono text-xs">{b.navigation}</Td>
-                        <Td className="text-xs">{new Date(b.updatedAt).toLocaleString()}</Td>
-                        <Td className="text-right pr-4">
-                          <div className="inline-flex items-center gap-2">
-                            <Button size="icon" variant="ghost" title="View" onClick={() => setOpenView(b)}>
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            <Button size="icon" variant="ghost" title="Edit" onClick={() => setOpenEdit(b)}>
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button size="icon" variant="ghost" title="Delete" onClick={() => onDelete(b.id)}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </Td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Create */}
-        <BannerFormDialog
-          open={openCreate}
-          onOpenChange={setOpenCreate}
-          title="Add Banner"
-          initial={null}
-          onSave={(payload) => {
-            const now = new Date().toISOString();
-            const newBanner: Banner = {
-              id: `ban_${Math.random().toString(16).slice(2)}`,
-              ...payload,
-              updatedAt: now,
-            };
-            setBanners((p) => [newBanner, ...p]);
-            setOpenCreate(false);
-            toast({ title: "Added", description: "Banner created." });
-          }}
-        />
-
-        {/* Edit */}
-        <BannerFormDialog
-          open={!!openEdit}
-          onOpenChange={(v) => !v && setOpenEdit(null)}
-          title="Edit Banner"
-          initial={openEdit}
-          onSave={(payload) => {
-            if (!openEdit) return;
-            const now = new Date().toISOString();
-            setBanners((p) =>
-              p.map((b) => (b.id === openEdit.id ? { ...b, ...payload, updatedAt: now } : b))
-            );
-            setOpenEdit(null);
-            toast({ title: "Updated", description: "Banner updated." });
-          }}
-        />
-
-        {/* View */}
-        <Dialog open={!!openView} onOpenChange={(v) => !v && setOpenView(null)}>
-          <DialogContent className="max-w-xl">
-            <DialogHeader>
-              <DialogTitle>Banner</DialogTitle>
-            </DialogHeader>
-
-            {openView && (
-              <div className="space-y-4">
-                <div>
-                  <div className="text-lg font-semibold">{openView.name}</div>
-                  <div className="text-sm text-muted-foreground font-mono">{openView.navigation}</div>
-                </div>
-
-                {openView.image ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={openView.image}
-                    alt={openView.name}
-                    className="w-full max-h-[260px] object-cover rounded-lg border"
-                  />
-                ) : (
-                  <div className="h-[220px] rounded-lg border flex items-center justify-center text-muted-foreground">
-                    <ImageIcon className="h-6 w-6" />
-                  </div>
-                )}
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
-      </div>
-    </AdminLayout>
-  );
-}
-
-/** ---------------------------
- * Small UI
- * -------------------------- */
-function Th({ children, className }: any) {
-  return <th className={cn("p-4 font-semibold text-muted-foreground", className)}>{children}</th>;
-}
-function Td({ children, className }: any) {
-  return <td className={cn("p-4 align-top", className)}>{children}</td>;
-}
-
-/** ---------------------------
- * Form Dialog (simple)
- * -------------------------- */
-type BannerPayload = Omit<Banner, "id" | "updatedAt">;
-
-function BannerFormDialog({
-  open,
-  onOpenChange,
-  title,
-  initial,
-  onSave,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  title: string;
-  initial: Banner | null;
-  onSave: (payload: BannerPayload) => void;
-}) {
-  const [name, setName] = useState(initial?.name ?? "");
-  const [navigation, setNavigation] = useState(initial?.navigation ?? "");
-  const [image, setImage] = useState<string>(initial?.image ?? "");
 
   useEffect(() => {
-    if (!open) return;
-    setName(initial?.name ?? "");
-    setNavigation(initial?.navigation ?? "");
-    setImage(initial?.image ?? "");
-  }, [open, initial?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    fetchBannerConfig(activeWebsite);
+  }, [activeWebsite]);
 
-  const onPickFile = (file?: File) => {
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      toast({ title: "Invalid file", description: "Please upload an image file.", variant: "destructive" });
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => setImage(String(reader.result || ""));
-    reader.readAsDataURL(file);
+  const currentConfig = configs[activeWebsite];
+
+  const updateVideoBanner = (field: keyof VideoBanner, value: any) => {
+    setConfigs((prev) => ({
+      ...prev,
+      [activeWebsite]: {
+        ...prev[activeWebsite],
+        videoBanner: {
+          ...prev[activeWebsite].videoBanner,
+          [field]: value,
+        },
+      },
+    }));
   };
 
-  const submit = () => {
-    if (!name.trim()) {
-      toast({ title: "Missing name", description: "Banner name is required." });
-      return;
-    }
-    if (!navigation.trim()) {
-      toast({ title: "Missing navigation", description: "Navigation is required (ex: /home)." });
-      return;
-    }
-    if (!image) {
-      toast({ title: "Missing image", description: "Please upload a banner image." });
-      return;
-    }
-
-    onSave({
-      name: name.trim(),
-      navigation: navigation.trim(),
-      image,
+  const updateDualBanner = (index: number, field: keyof DualBannerItem, value: any) => {
+    setConfigs((prev) => {
+      const updatedBanners = [...prev[activeWebsite].dualBanners];
+      updatedBanners[index] = {
+        ...updatedBanners[index],
+        [field]: value,
+      };
+      return {
+        ...prev,
+        [activeWebsite]: {
+          ...prev[activeWebsite],
+          dualBanners: updatedBanners,
+        },
+      };
     });
   };
 
+  // Image Upload Handler with IMMEDIATE AUTO-SAVE
+  const handleImageUpload = async (index: number, file: File) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({
+        title: "Invalid File",
+        description: "Please upload a valid image file (JPG, PNG, WebP).",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setUploadingIndex(index);
+    const formData = new FormData();
+    formData.append("image", file);
+    formData.append("website", activeWebsite);
+    formData.append("bannerIndex", String(index + 1));
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/admin/banners/upload?website=${activeWebsite}&bannerIndex=${index + 1}`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+      const data = await res.json();
+
+      if (res.ok && data.imageUrl) {
+        updateDualBanner(index, "imageUrl", data.imageUrl);
+        toast({
+          title: "Image Uploaded & Saved ✅",
+          description: `Banner #${index + 1} has been updated and is now live on ${activeWebsite.toUpperCase()} website!`,
+        });
+      } else {
+        throw new Error(data.message || "Upload failed");
+      }
+    } catch (err: any) {
+      toast({
+        title: "Upload Failed",
+        description: err.message || "Could not upload image to server.",
+        variant: "destructive",
+      });
+    } finally {
+      setUploadingIndex(null);
+    }
+  };
+
+  // Save All Changes (Video URL + Navigation Links) to MongoDB
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/banners/${activeWebsite}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("Admintoken") || ""}`,
+        },
+        body: JSON.stringify({
+          videoBanner: currentConfig.videoBanner,
+          dualBanners: currentConfig.dualBanners,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to save banners");
+
+      toast({
+        title: "Banners Saved Successfully ✅",
+        description: `Video and dual banners for ${activeWebsite.toUpperCase()} website are updated and live!`,
+      });
+    } catch (err: any) {
+      toast({
+        title: "Save Failed",
+        description: err.message || "Error communicating with backend.",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const youtubeId = currentConfig.videoBanner.videoUrl
+    ? getYouTubeVideoId(currentConfig.videoBanner.videoUrl)
+    : null;
+  const vimeoId = currentConfig.videoBanner.videoUrl
+    ? getVimeoVideoId(currentConfig.videoBanner.videoUrl)
+    : null;
+  const driveId = currentConfig.videoBanner.videoUrl
+    ? getGoogleDriveVideoId(currentConfig.videoBanner.videoUrl)
+    : null;
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-        </DialogHeader>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-3">
-            <div>
-              <Label>Banner Name*</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Home Banner" />
+    <AdminLayout panelType="cap">
+      <div className="p-6 space-y-6 max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b pb-5">
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl font-bold tracking-tight">Banner Management</h1>
+              <Badge variant="outline" className="border-primary text-primary px-3 py-1">
+                Visual Banners (No Text)
+              </Badge>
             </div>
-
-            <div>
-              <Label>Navigation*</Label>
-              <Input value={navigation} onChange={(e) => setNavigation(e.target.value)} placeholder="/cap" />
-              <p className="text-xs text-muted-foreground mt-1">
-                Where should this banner navigate when clicked.
-              </p>
-            </div>
-
-            <div>
-              <Label>Upload Image*</Label>
-              <Input type="file" accept="image/*" onChange={(e) => onPickFile(e.target.files?.[0])} />
-              <p className="text-xs text-muted-foreground mt-1">
-                Recommended: 1600×600 (or 1200×450).
-              </p>
-            </div>
+            <p className="text-sm text-muted-foreground mt-1">
+              Manage 1 Hero Video Banner and 2 Dual Promotional Banners. Banners display pure visual media without text overlays.
+            </p>
           </div>
 
-          <div className="space-y-2">
-            <Label>Preview</Label>
-            {image ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={image} alt="preview" className="w-full h-[220px] object-cover rounded-lg border" />
-            ) : (
-              <div className="w-full h-[220px] rounded-lg border flex items-center justify-center text-muted-foreground">
-                <ImageIcon className="h-6 w-6" />
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fetchBannerConfig(activeWebsite)}
+              disabled={loading}
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+              Reload
+            </Button>
+            <Button onClick={handleSave} disabled={saving} className="bg-primary text-primary-foreground min-w-[140px]">
+              <Save className="h-4 w-4 mr-2" />
+              {saving ? "Saving..." : "Save All Changes"}
+            </Button>
+          </div>
+        </div>
+
+        {/* Website Selector Tabs */}
+        <div className="flex items-center justify-between">
+          <Tabs
+            value={activeWebsite}
+            onValueChange={(val) => setActiveWebsite(val as "affordable" | "midrange")}
+            className="w-full"
+          >
+            <TabsList className="grid w-full max-w-md grid-cols-2">
+              <TabsTrigger value="affordable" className="font-semibold">
+                Affordable Website
+              </TabsTrigger>
+              <TabsTrigger value="midrange" className="font-semibold">
+                Mid-Range Website
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+
+        {/* Sizing & Dimensions Guide Alert */}
+        <Card className="border-blue-200 bg-blue-50/50 dark:bg-blue-950/20">
+          <CardContent className="p-4 flex items-start gap-3">
+            <Info className="h-5 w-5 text-blue-600 mt-0.5 shrink-0" />
+            <div className="text-xs md:text-sm space-y-1 text-blue-900 dark:text-blue-200">
+              <span className="font-semibold block">Media Guidelines:</span>
+              <ul className="list-disc list-inside space-y-0.5 opacity-90">
+                <li>
+                  <strong>Video Link:</strong> Works with <strong>YouTube</strong> links, <strong>Vimeo</strong> links, or direct <strong>MP4/WebM</strong> links. Recommended ratio: 16:9.
+                </li>
+                <li>
+                  <strong>Dual Banners:</strong> Recommended size: <strong>800 × 450 px (16:9)</strong> or <strong>1200 × 600 px</strong>. Uploading an image automatically saves it to the database!
+                </li>
+              </ul>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Section 1: Hero Video Banner */}
+        <Card>
+          <CardHeader className="border-b bg-muted/30">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Video className="h-5 w-5 text-primary" />
+                <div>
+                  <CardTitle className="text-lg">1. Hero Video Banner (After Navbar)</CardTitle>
+                  <CardDescription>
+                    Autoplays muted on loop. Paste YouTube, Vimeo, or direct MP4 URL.
+                  </CardDescription>
+                </div>
               </div>
-            )}
-          </div>
-        </div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="video-active" className="text-sm font-medium">
+                  Active
+                </Label>
+                <Switch
+                  id="video-active"
+                  checked={currentConfig.videoBanner.isActive !== false}
+                  onCheckedChange={(val) => updateVideoBanner("isActive", val)}
+                />
+              </div>
+            </div>
+          </CardHeader>
 
-        <div className="flex items-center justify-end gap-2 pt-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+          <CardContent className="p-6 space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Form inputs */}
+              <div className="lg:col-span-6 space-y-4">
+                <div>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Video Link (YouTube, Vimeo, or MP4 URL)*
+                  </Label>
+                  <Input
+                    value={currentConfig.videoBanner.videoUrl}
+                    onChange={(e) => updateVideoBanner("videoUrl", e.target.value)}
+                    placeholder="https://www.youtube.com/watch?v=... or https://.../video.mp4"
+                    className="mt-1 font-mono text-xs"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Accepts standard YouTube links, Vimeo, or direct MP4 URLs.
+                  </p>
+                </div>
+
+                <div>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Navigation Link (Optional)
+                  </Label>
+                  <Input
+                    value={currentConfig.videoBanner.ctaLink || ""}
+                    onChange={(e) => updateVideoBanner("ctaLink", e.target.value)}
+                    placeholder="/categories or /products"
+                    className="mt-1 font-mono text-xs"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Where the user goes if they click the video banner.
+                  </p>
+                </div>
+              </div>
+
+              {/* Live Video Player Preview */}
+              <div className="lg:col-span-6 space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Live Video Player Preview
+                </Label>
+                <div className="relative aspect-video rounded-xl overflow-hidden bg-black border shadow-inner flex items-center justify-center">
+                  {youtubeId ? (
+                    <div className="absolute inset-0 w-full h-full overflow-hidden flex items-center justify-center pointer-events-none">
+                      <iframe
+                        src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=1&loop=1&playlist=${youtubeId}&controls=0&modestbranding=1&rel=0&playsinline=1&showinfo=0&iv_load_policy=3&disablekb=1&fs=0`}
+                        className="w-[130%] h-[130%] object-cover pointer-events-none"
+                        allow="autoplay; encrypted-media; picture-in-picture"
+                        title="YouTube Preview"
+                      />
+                    </div>
+                  ) : vimeoId ? (
+                    <div className="absolute inset-0 w-full h-full overflow-hidden flex items-center justify-center pointer-events-none">
+                      <iframe
+                        src={`https://player.vimeo.com/video/${vimeoId}?background=1&autoplay=1&loop=1&muted=1&controls=0`}
+                        className="w-[125%] h-[125%] object-cover pointer-events-none"
+                        allow="autoplay; fullscreen"
+                        title="Vimeo Preview"
+                      />
+                    </div>
+                  ) : driveId ? (
+                    <div className="absolute inset-0 w-full h-full overflow-hidden flex items-center justify-center pointer-events-none">
+                      <iframe
+                        src={`https://drive.google.com/file/d/${driveId}/preview`}
+                        className="w-[125%] h-[125%] object-cover pointer-events-none"
+                        allow="autoplay"
+                        title="Google Drive Preview"
+                      />
+                    </div>
+                  ) : currentConfig.videoBanner.videoUrl ? (
+                    <video
+                      key={currentConfig.videoBanner.videoUrl}
+                      src={currentConfig.videoBanner.videoUrl}
+                      poster={currentConfig.videoBanner.posterUrl}
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      disablePictureInPicture
+                      className="w-full h-full object-cover pointer-events-none"
+                    />
+                  ) : (
+                    <div className="text-center p-6 text-muted-foreground">
+                      <Video className="h-10 w-10 mx-auto mb-2 opacity-50" />
+                      <p className="text-xs">Paste a video link to see live playback</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Section 2: Dual Banners */}
+        <Card>
+          <CardHeader className="border-b bg-muted/30">
+            <div className="flex items-center gap-2">
+              <ImageIcon className="h-5 w-5 text-primary" />
+              <div>
+                <CardTitle className="text-lg">2. Dual Promotional Banners (Side-by-Side)</CardTitle>
+                <CardDescription>
+                  Upload pure visual banners (no text overlays). Uploaded images are automatically saved and immediately live.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className="p-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {currentConfig.dualBanners.map((banner, index) => (
+                <div key={index} className="p-5 border rounded-xl space-y-4 bg-card/60 shadow-sm">
+                  <div className="flex items-center justify-between pb-2 border-b">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary" className="font-bold">
+                        Dual Banner #{index + 1}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">Size: 800×450 px</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor={`banner-active-${index}`} className="text-xs">
+                        Active
+                      </Label>
+                      <Switch
+                        id={`banner-active-${index}`}
+                        checked={banner.isActive !== false}
+                        onCheckedChange={(val) => updateDualBanner(index, "isActive", val)}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Pure Image Preview Box */}
+                  <div className="relative aspect-[16/9] rounded-lg overflow-hidden border bg-muted/40 group">
+                    {banner.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={banner.imageUrl}
+                        alt={`Banner ${index + 1}`}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground p-4">
+                        <ImageIcon className="h-8 w-8 mb-1 opacity-50" />
+                        <span className="text-xs font-medium">No banner image uploaded</span>
+                        <span className="text-[11px] text-muted-foreground">Recommended: 800×450 px</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Upload Image Button with Auto-Save */}
+                  <div>
+                    <label className="block w-full">
+                      <Button
+                        type="button"
+                        variant="default"
+                        className="w-full text-xs font-semibold"
+                        disabled={uploadingIndex === index}
+                        asChild
+                      >
+                        <span>
+                          <Upload className="h-4 w-4 mr-2" />
+                          {uploadingIndex === index ? "Uploading & Saving..." : `Upload Banner #${index + 1} Image (800×450)`}
+                        </span>
+                      </Button>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleImageUpload(index, file);
+                        }}
+                      />
+                    </label>
+                    <p className="text-[11px] text-green-700 dark:text-green-400 mt-1 font-medium text-center">
+                      ⚡ Uploading immediately saves and updates the live website!
+                    </p>
+                  </div>
+
+                  {/* Manual URL Input */}
+                  <div>
+                    <Label className="text-xs text-muted-foreground font-medium">Or Image URL</Label>
+                    <Input
+                      value={banner.imageUrl}
+                      onChange={(e) => updateDualBanner(index, "imageUrl", e.target.value)}
+                      placeholder="https://images.unsplash.com/..."
+                      className="mt-1 font-mono text-xs"
+                    />
+                  </div>
+
+                  {/* Click Target Navigation Link */}
+                  <div>
+                    <Label className="text-xs text-muted-foreground font-medium">Click Navigation Link</Label>
+                    <Input
+                      value={banner.ctaLink || ""}
+                      onChange={(e) => updateDualBanner(index, "ctaLink", e.target.value)}
+                      placeholder="/categories/living-room or /products"
+                      className="mt-1 font-mono text-xs"
+                    />
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Where the user goes when clicking this banner.
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Floating Save Action */}
+        <div className="sticky bottom-6 p-4 rounded-xl bg-card/90 backdrop-blur-md border shadow-lg flex items-center justify-between z-30">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <CheckCircle2 className="h-4 w-4 text-green-600" />
+            <span>Editing banners for <strong>{activeWebsite.toUpperCase()}</strong> website</span>
+          </div>
+
+          <Button onClick={handleSave} disabled={saving} size="lg" className="px-6 font-semibold">
+            <Save className="h-4 w-4 mr-2" />
+            {saving ? "Saving..." : "Save All Changes"}
           </Button>
-          <Button onClick={submit}>{initial ? "Save" : "Add Banner"}</Button>
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </AdminLayout>
   );
 }

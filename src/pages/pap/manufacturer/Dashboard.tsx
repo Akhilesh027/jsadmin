@@ -215,7 +215,7 @@ export default function ManufacturerDashboard() {
           </div>
         </Link>
 
-        
+
       </div>
 
       {/* Recent Activity */}

@@ -223,10 +223,10 @@ type Order = {
 type OrdersResponse =
   | Order[]
   | {
-      success?: boolean;
-      data?: Order[];
-      message?: string;
-    };
+    success?: boolean;
+    data?: Order[];
+    message?: string;
+  };
 
 /** ---------------- Helpers ---------------- */
 
@@ -273,10 +273,10 @@ const formatDateTime = (iso?: string) =>
 const formatDate = (iso?: string) =>
   iso
     ? new Date(iso).toLocaleDateString("en-IN", {
-        year: "numeric",
-        month: "short",
-        day: "2-digit",
-      })
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+    })
     : "—";
 
 const orderShortId = (id: string) => `#${id.slice(-6).toUpperCase()}`;
@@ -301,13 +301,13 @@ const getCustomerLabel = (order: Order) =>
 const getCustomerSub = (order: Order) =>
   [
     nonEmpty(order.userDetails?.email) ||
-      nonEmpty(order.addressDetails?.email) ||
-      nonEmpty(order.addressSnapshot?.email) ||
-      nonEmpty(order.shippingAddress?.email),
+    nonEmpty(order.addressDetails?.email) ||
+    nonEmpty(order.addressSnapshot?.email) ||
+    nonEmpty(order.shippingAddress?.email),
     nonEmpty(order.userDetails?.phone) ||
-      nonEmpty(order.addressSnapshot?.phone) ||
-      nonEmpty(order.addressDetails?.phone) ||
-      nonEmpty(order.shippingAddress?.phone),
+    nonEmpty(order.addressSnapshot?.phone) ||
+    nonEmpty(order.addressDetails?.phone) ||
+    nonEmpty(order.shippingAddress?.phone),
   ]
     .filter(Boolean)
     .join(" • ");
@@ -385,17 +385,17 @@ const paymentLabel = (o: Order) => {
 const getSubtotal = (o: Order) =>
   Number(
     o.totals?.subtotal ??
-      o.pricing?.subtotal ??
-      (Array.isArray(o.items) ? o.items : []).reduce((s, it) => {
-        const price = Number(
-          it.finalPrice ?? it.productSnapshot?.price ?? it.price ?? it.lineTotal ?? 0
-        );
-        const qty = Number(it.quantity || 0);
-        if (it.finalPrice != null || it.price != null || it.productSnapshot?.price != null) {
-          return s + price * (it.finalPrice != null ? qty : 1);
-        }
-        return s + price;
-      }, 0)
+    o.pricing?.subtotal ??
+    (Array.isArray(o.items) ? o.items : []).reduce((s, it) => {
+      const price = Number(
+        it.finalPrice ?? it.productSnapshot?.price ?? it.price ?? it.lineTotal ?? 0
+      );
+      const qty = Number(it.quantity || 0);
+      if (it.finalPrice != null || it.price != null || it.productSnapshot?.price != null) {
+        return s + price * (it.finalPrice != null ? qty : 1);
+      }
+      return s + price;
+    }, 0)
   );
 
 const getDiscount = (o: Order) =>
@@ -404,11 +404,11 @@ const getDiscount = (o: Order) =>
 const getShipping = (o: Order) =>
   Number(
     o.totals?.shipping ??
-      o.pricing?.shippingCost ??
-      o.pricing?.shipping ??
-      o.totals?.shippingBase ??
-      o.pricing?.shippingBase ??
-      0
+    o.pricing?.shippingCost ??
+    o.pricing?.shipping ??
+    o.totals?.shippingBase ??
+    o.pricing?.shippingBase ??
+    0
   );
 
 const getTax = (o: Order) => Number(o.totals?.tax ?? o.pricing?.tax ?? 0);
@@ -416,8 +416,8 @@ const getTax = (o: Order) => Number(o.totals?.tax ?? o.pricing?.tax ?? 0);
 const getTotal = (o: Order) =>
   Number(
     o.totals?.total ??
-      o.pricing?.total ??
-      Math.max(0, getSubtotal(o) - getDiscount(o) + getShipping(o) + getTax(o))
+    o.pricing?.total ??
+    Math.max(0, getSubtotal(o) - getDiscount(o) + getShipping(o) + getTax(o))
   );
 
 const isTerminalStatus = (s?: string) =>
@@ -469,14 +469,14 @@ export default function CustomerOrderHistory() {
       (w.includes("afford")
         ? "Affordable"
         : w.includes("mid")
-        ? "Mid Range"
-        : w.includes("lux")
-        ? "Luxury"
-        : o.customerId
-        ? "Luxury"
-        : o.userId && o.addressSnapshot
-        ? "Mid Range"
-        : "Luxury");
+          ? "Mid Range"
+          : w.includes("lux")
+            ? "Luxury"
+            : o.customerId
+              ? "Luxury"
+              : o.userId && o.addressSnapshot
+                ? "Mid Range"
+                : "Luxury");
 
     return { ...o, websiteLabel: lbl as "Affordable" | "Mid Range" | "Luxury" };
   };

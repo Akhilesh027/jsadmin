@@ -350,8 +350,8 @@ export default function AdminForm() {
                     ? "Updating..."
                     : "Creating..."
                   : isEdit
-                  ? "Update Admin"
-                  : "Create Admin"}
+                    ? "Update Admin"
+                    : "Create Admin"}
               </Button>
 
               <Button

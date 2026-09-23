@@ -185,7 +185,7 @@ const AdminEstimates: React.FC = () => {
         try {
           const text = await response.text();
           errorMsg = text.substring(0, 150);
-        } catch {}
+        } catch { }
         throw new Error(errorMsg);
       }
 

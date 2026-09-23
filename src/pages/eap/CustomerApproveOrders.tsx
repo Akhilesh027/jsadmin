@@ -124,11 +124,11 @@ type Order = {
 type OrdersResponse =
   | Order[]
   | {
-      success?: boolean;
-      data?: Order[];
-      message?: string;
-      pagination?: any;
-    };
+    success?: boolean;
+    data?: Order[];
+    message?: string;
+    pagination?: any;
+  };
 
 type OrderResponse = {
   success?: boolean;
@@ -305,8 +305,8 @@ export function CustomerApproveOrders() {
         segment === "affordable"
           ? SEGMENT_API.affordable
           : segment === "midrange"
-          ? SEGMENT_API.midrange
-          : SEGMENT_API.luxury;
+            ? SEGMENT_API.midrange
+            : SEGMENT_API.luxury;
 
       const res = await api<OrdersResponse>(`${base}${qs}`);
       const list = normalizeResponse(res).map((o) => ({
@@ -316,8 +316,8 @@ export function CustomerApproveOrders() {
           segment === "affordable"
             ? ("Affordable" as const)
             : segment === "midrange"
-            ? ("Mid Range" as const)
-            : ("Luxury" as const),
+              ? ("Mid Range" as const)
+              : ("Luxury" as const),
       }));
 
       setOrders(list);

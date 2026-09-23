@@ -351,7 +351,7 @@ export default function ManufacturerList() {
         header: "Products",
         render: (mfg: MfgWithId) => <span className="font-medium">{mfg.catalogCount}</span>,
       },
-     
+
       {
         key: "status",
         header: "Status",
@@ -494,7 +494,7 @@ export default function ManufacturerList() {
               <p className="font-medium">{selected.catalogCount ?? 0}</p>
             </div>
 
-          
+
 
             <div className="rounded-lg border p-3">
               <p className="text-sm text-muted-foreground">Orders</p>

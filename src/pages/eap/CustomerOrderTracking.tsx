@@ -184,10 +184,10 @@ type Order = {
 type OrdersResponse =
   | Order[]
   | {
-      data?: Order[];
-      message?: string;
-      success?: boolean;
-    };
+    data?: Order[];
+    message?: string;
+    success?: boolean;
+  };
 
 const safeJson = async (res: Response) => {
   try {
@@ -215,10 +215,10 @@ const formatCurrency = (amount = 0) =>
 const formatDate = (iso?: string) =>
   iso
     ? new Date(iso).toLocaleDateString(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "2-digit",
-      })
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+    })
     : "—";
 
 const getOrderNumber = (order: Order) =>
@@ -251,13 +251,13 @@ const customerLabel = (o: Order) =>
 const customerSub = (o: Order) =>
   [
     nonEmpty(o.userDetails?.email) ||
-      nonEmpty(o.addressDetails?.email) ||
-      nonEmpty(o.addressSnapshot?.email) ||
-      nonEmpty(o.shippingAddress?.email),
+    nonEmpty(o.addressDetails?.email) ||
+    nonEmpty(o.addressSnapshot?.email) ||
+    nonEmpty(o.shippingAddress?.email),
     nonEmpty(o.userDetails?.phone) ||
-      nonEmpty(o.addressSnapshot?.phone) ||
-      nonEmpty(o.addressDetails?.phone) ||
-      nonEmpty(o.shippingAddress?.phone),
+    nonEmpty(o.addressSnapshot?.phone) ||
+    nonEmpty(o.addressDetails?.phone) ||
+    nonEmpty(o.shippingAddress?.phone),
   ]
     .filter(Boolean)
     .join(" • ");

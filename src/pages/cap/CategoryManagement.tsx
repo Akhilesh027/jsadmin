@@ -134,12 +134,12 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   const headers: Record<string, string> = {
     ...(options.headers as any),
   };
-  
+
   // Don't set Content-Type for FormData, let browser set it with boundary
   if (!(options.body instanceof FormData)) {
     headers["Content-Type"] = "application/json";
   }
-  
+
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
@@ -270,7 +270,7 @@ export default function CategoryManagement() {
     try {
       await apiFetch<{ success: boolean; message?: string; data?: any }>(`/${id}`, { method: "DELETE" });
       toast({ title: "Deleted", description: "Category deleted.", variant: "destructive" });
-      
+
       const nextTotal = Math.max(0, totalItems - 1);
       const maxPage = Math.max(1, Math.ceil(nextTotal / limit));
       const nextPage = Math.min(page, maxPage);
@@ -401,7 +401,7 @@ export default function CategoryManagement() {
                     <Th className="text-center">Order</Th>
                     <Th>Updated</Th>
                     <Th className="text-right pr-4">Actions</Th>
-                   </tr>
+                  </tr>
                 </thead>
                 <tbody>
                   {loading ? (
@@ -754,7 +754,7 @@ function CategoryFormDialog({
     }
 
     setImageFile(file);
-    
+
     // Create preview
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -801,7 +801,7 @@ function CategoryFormDialog({
       if (seoTitle.trim()) formData.append("seoTitle", seoTitle.trim());
       if (seoDescription.trim()) formData.append("seoDescription", seoDescription.trim());
       if (seoKeywords.trim()) formData.append("seoKeywords", seoKeywords.trim());
-      
+
       // Add image file if present
       if (imageFile) {
         formData.append("image", imageFile);

@@ -285,9 +285,8 @@ export default function AdminList() {
         title={admin.isActive ? "Deactivate" : "Activate"}
       >
         <span
-          className={`h-3 w-3 rounded-full ${
-            admin.isActive ? "bg-destructive" : "bg-success"
-          }`}
+          className={`h-3 w-3 rounded-full ${admin.isActive ? "bg-destructive" : "bg-success"
+            }`}
         />
       </Button>
 

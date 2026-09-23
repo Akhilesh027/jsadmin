@@ -51,17 +51,17 @@ type ApiOrder = {
   paymentMode?: string;
   paymentOption?: string;
   status:
-    | "draft"
-    | "sent"
-    | "pending"
-    | "accepted"
-    | "rejected"
-    | "packed"
-    | "shipped"
-    | "in_transit"
-    | "out_for_delivery"
-    | "delivered"
-    | "completed";
+  | "draft"
+  | "sent"
+  | "pending"
+  | "accepted"
+  | "rejected"
+  | "packed"
+  | "shipped"
+  | "in_transit"
+  | "out_for_delivery"
+  | "delivered"
+  | "completed";
 };
 
 type ProductDetail = {

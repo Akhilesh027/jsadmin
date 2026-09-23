@@ -54,6 +54,7 @@ import EcommerceReports from "./pages/eap/EcommerceReports";
 import LegalPagesManager from "./pages/eap/LegalPagesManager";
 import AdminEstimates from "./pages/cap/Estimates";
 import ShippingCostManagement from "./pages/cap/ShippingCostManagement";
+import InteriorInquiries from "./pages/cap/InteriorInquiries";
 
 const queryClient = new QueryClient();
 
@@ -295,6 +296,22 @@ const App = () => (
             element={
               <RequireAuth>
                 <CustomerList />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/cap/interior-inquiries"
+            element={
+              <RequireAuth>
+                <InteriorInquiries />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/admin/interior-inquiries"
+            element={
+              <RequireAuth>
+                <InteriorInquiries />
               </RequireAuth>
             }
           />

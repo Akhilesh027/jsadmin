@@ -24,6 +24,8 @@ import {
   Layers,
   ImageIcon,
   BarChart3,
+  Sparkles,
+  Home,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
@@ -59,11 +61,12 @@ const coreAdminNav: NavItem[] = [
     children: [{ title: "All Vendors", href: "/cap/vendors", icon: Store }],
   },
   { title: "Customers", href: "/cap/customers", icon: Users },
+  { title: "Interior Inquiries", href: "/cap/interior-inquiries", icon: Sparkles },
+  { title: "Estimates", href: "/admin/estimates", icon: FileText },
   { title: "Coupons", href: "/cap/coupons", icon: Ticket },
   { title: "Categories", href: "/cap/categories", icon: Layers },
   { title: "Banners", href: "/cap/banners", icon: ImageIcon },
   { title: "Shipping Costs", href: "/admin/shipping-costs", icon: Truck },
-  { title: "Estimates", href: "/admin/estimates", icon: FileText },
   { title: "Reports", href: "/cap/reports", icon: FileText },
 ];
 

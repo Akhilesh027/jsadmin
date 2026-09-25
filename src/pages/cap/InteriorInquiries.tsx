@@ -51,7 +51,7 @@ const getApiBase = () => {
     typeof window !== "undefined" &&
     (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
   ) {
-    return "http://localhost:5000";
+    return "https://api.jsgallor.com";
   }
   return "https://api.jsgallor.com";
 };
@@ -745,9 +745,8 @@ export default function InteriorInquiries() {
                       Lead Details & Management
                     </DialogTitle>
                     <span
-                      className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                        FORM_TYPE_LABELS[selectedInquiry.formType]?.color || "bg-muted"
-                      }`}
+                      className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${FORM_TYPE_LABELS[selectedInquiry.formType]?.color || "bg-muted"
+                        }`}
                     >
                       {FORM_TYPE_LABELS[selectedInquiry.formType]?.label || selectedInquiry.formType}
                     </span>

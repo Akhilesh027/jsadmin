@@ -40,7 +40,13 @@ type Status =
   | "processing"
   | "returned";
 
-const API_ROOT = "https://api.jsgallor.com/api/admin";
+const API_BASE_URL =
+  (import.meta as any).env?.VITE_API_BASE_URL ||
+  (import.meta as any).env?.VITE_API_URL ||
+  (import.meta as any).env?.VITE_BASE_URL ||
+  "https://api.jsgallor.com";
+
+const API_ROOT = `${API_BASE_URL.replace(/\/$/, "")}/api/admin`;
 const API_ALL = `${API_ROOT}/orders/all`;
 
 const SEGMENT_API: Record<Exclude<Segment, "all">, string> = {
@@ -623,18 +629,27 @@ export default function CustomerOrderHistory() {
   const sendInvoiceEmail = async (order: Order) => {
     setActionId(order._id);
     try {
-      const base = segment === "all" ? resolveBaseForOrder(order) : SEGMENT_API[segment];
+      const base = resolveBaseForOrder(order) || SEGMENT_API[segment] || `${API_ROOT}/orders`;
       const toEmail =
         nonEmpty(order.userDetails?.email) ||
         nonEmpty(order.addressDetails?.email) ||
         nonEmpty(order.shippingAddress?.email) ||
         "";
 
-      const res = await fetch(`${base}/${order._id}/invoice/email`, {
+      let res = await fetch(`${base}/${order._id}/invoice/email`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ email: toEmail || undefined }),
       });
+
+      if (!res.ok && res.status === 404) {
+        // Fallback to direct admin invoice email route
+        res = await fetch(`${API_ROOT}/orders/${order._id}/invoice/email`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify({ email: toEmail || undefined }),
+        });
+      }
 
       const data = await safeJson(res);
       if (!res.ok) throw new Error(data?.message || "Failed to send invoice");
@@ -657,13 +672,21 @@ export default function CustomerOrderHistory() {
   const downloadInvoice = async (order: Order) => {
     setActionId(order._id);
     try {
-      const base = segment === "all" ? resolveBaseForOrder(order) : SEGMENT_API[segment];
+      const base = resolveBaseForOrder(order) || SEGMENT_API[segment] || `${API_ROOT}/orders`;
       const token = localStorage.getItem("token");
 
-      const res = await fetch(`${base}/${order._id}/invoice/pdf`, {
+      let res = await fetch(`${base}/${order._id}/invoice/pdf`, {
         method: "GET",
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
+
+      if (!res.ok && res.status === 404) {
+        // Fallback to direct admin invoice pdf route
+        res = await fetch(`${API_ROOT}/orders/${order._id}/invoice/pdf`, {
+          method: "GET",
+          headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        });
+      }
 
       if (!res.ok) {
         const data = await safeJson(res);
@@ -671,16 +694,18 @@ export default function CustomerOrderHistory() {
       }
 
       const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
+      const pdfBlob = new Blob([blob], { type: "application/pdf" });
+      const url = window.URL.createObjectURL(pdfBlob);
 
       const a = document.createElement("a");
       a.href = url;
       a.download = `invoice-${order.orderNumber || order._id}.pdf`;
       document.body.appendChild(a);
       a.click();
-      a.remove();
-
-      window.URL.revokeObjectURL(url);
+      setTimeout(() => {
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      }, 1000);
 
       toast({ title: "Downloaded", description: "Invoice PDF downloaded." });
     } catch (err: any) {
@@ -1144,7 +1169,11 @@ export default function CustomerOrderHistory() {
                         disabled={actionId === viewOrder._id}
                         onClick={() => sendInvoiceEmail(viewOrder)}
                       >
-                        <Mail className="h-4 w-4 mr-2" />
+                        {actionId === viewOrder._id ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Mail className="h-4 w-4 mr-2" />
+                        )}
                         Send Invoice
                       </Button>
 
@@ -1154,8 +1183,12 @@ export default function CustomerOrderHistory() {
                         disabled={actionId === viewOrder._id}
                         onClick={() => downloadInvoice(viewOrder)}
                       >
-                        <Download className="h-4 w-4 mr-2" />
-                        Download PDF
+                        {actionId === viewOrder._id ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Download className="h-4 w-4 mr-2" />
+                        )}
+                        {actionId === viewOrder._id ? "Generating PDF..." : "Download PDF"}
                       </Button>
                     </div>
                   </div>

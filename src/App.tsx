@@ -59,7 +59,12 @@ import InteriorInquiries from "./pages/cap/InteriorInquiries";
 const queryClient = new QueryClient();
 
 /** ✅ BACKEND LOGIN API */
-const AUTH_API = "https://api.jsgallor.com/api/admin/auth/login";
+const API_BASE =
+  import.meta.env.VITE_API_URL ||
+  (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+    ? "http://localhost:5000"
+    : "https://api.jsgallor.com");
+const AUTH_API = `${API_BASE}/api/admin/auth/login`;
 
 /** ---------------------------
  * Helpers

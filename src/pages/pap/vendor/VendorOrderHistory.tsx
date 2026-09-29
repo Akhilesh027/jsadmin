@@ -12,6 +12,7 @@ import {
   Truck,
   ShieldCheck,
   Ban,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
@@ -22,6 +23,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -236,6 +247,8 @@ export default function VendorOrderHistory() {
 
   const [viewOrder, setViewOrder] = useState<Order | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Order | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const authHeaders = () => {
     const token = getAdminToken();
@@ -486,16 +499,59 @@ export default function VendorOrderHistory() {
     []
   );
 
+  const handleDeleteOrder = async () => {
+    if (!deleteTarget) return;
+    try {
+      setDeleting(true);
+      const res = await fetch(`${VENDOR_ORDERS_API}/${deleteTarget._id}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      const data = await safeJson(res);
+      if (!res.ok) throw new Error(data?.message || "Failed to delete vendor order");
+
+      toast({
+        title: "Order Deleted",
+        description: `Vendor order ${getOrderNumber(deleteTarget)} deleted successfully.`,
+      });
+
+      if (viewOrder?._id === deleteTarget._id) {
+        setViewOrder(null);
+      }
+      setDeleteTarget(null);
+      fetchOrders();
+    } catch (err: any) {
+      toast({
+        title: "Delete failed",
+        description: err?.message || "Could not delete vendor order",
+        variant: "destructive",
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const actions = (order: Order) => (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="h-8 w-8"
-      onClick={() => setViewOrder(order)}
-      title="View"
-    >
-      <Eye className="h-4 w-4" />
-    </Button>
+    <div className="flex items-center gap-1">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8"
+        onClick={() => setViewOrder(order)}
+        title="View Details"
+      >
+        <Eye className="h-4 w-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+        onClick={() => setDeleteTarget(order)}
+        title="Delete Order"
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
+    </div>
   );
 
   const tableData = useMemo(() => orders, [orders]);
@@ -953,12 +1009,57 @@ export default function VendorOrderHistory() {
                       Mark Delivered
                     </Button>
                   ) : null}
+
+                  <Button
+                    variant="destructive"
+                    disabled={actionId === viewOrder._id}
+                    onClick={() => setDeleteTarget(viewOrder)}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete Order
+                  </Button>
                 </div>
               </>
             )}
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ✅ Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Vendor Order</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to permanently delete vendor order{" "}
+              <span className="font-semibold text-foreground font-mono">
+                {deleteTarget ? getOrderNumber(deleteTarget) : ""}
+              </span>
+              ? This action cannot be undone and will permanently remove this order from the database.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault();
+                handleDeleteOrder();
+              }}
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete Order"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AdminLayout>
   );
 }

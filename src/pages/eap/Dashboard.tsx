@@ -126,7 +126,7 @@ export default function EcommerceDashboard() {
         </Link>
 
         <Link
-          to="/eap/orders/history"
+          to="/eap/orders/approve"
           className="stat-card hover:border-primary/50 border border-transparent"
         >
           <p className="font-medium">Pending Approval</p>
@@ -136,7 +136,7 @@ export default function EcommerceDashboard() {
         </Link>
 
         <Link
-          to="/eap/orders/history"
+          to="/eap/orders/track"
           className="stat-card hover:border-primary/50 border border-transparent"
         >
           <p className="font-medium">In Progress</p>

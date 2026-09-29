@@ -17,11 +17,22 @@ import {
   CreditCard,
   Wrench,
   MapPinned,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type Segment = "all" | "affordable" | "midrange" | "luxury";
@@ -455,6 +466,8 @@ export default function CustomerOrderHistory() {
   const [loading, setLoading] = useState(false);
   const [viewOrder, setViewOrder] = useState<Order | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Order | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const authHeaders = () => {
     const token = localStorage.getItem("token");
@@ -719,6 +732,47 @@ export default function CustomerOrderHistory() {
     }
   };
 
+  const handleDeleteOrder = async () => {
+    if (!deleteTarget) return;
+    try {
+      setDeleting(true);
+      const orderId = deleteTarget._id;
+      const base = resolveBaseForOrder(deleteTarget) || `${API_ROOT}/orders`;
+      let res = await fetch(`${base}/${orderId}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      if (!res.ok && res.status === 404) {
+        res = await fetch(`${API_ROOT}/orders/${orderId}`, {
+          method: "DELETE",
+          headers: authHeaders(),
+        });
+      }
+
+      const data = await safeJson(res);
+      if (!res.ok) throw new Error(data?.message || "Failed to delete order");
+
+      toast({
+        title: "Order Deleted",
+        description: `Order ${orderShortId(orderId)} has been deleted successfully.`,
+      });
+
+      if (viewOrder?._id === orderId) {
+        setViewOrder(null);
+      }
+      setDeleteTarget(null);
+      fetchOrders();
+    } catch (err: any) {
+      toast({
+        title: "Delete failed",
+        description: err?.message || "Could not delete order",
+        variant: "destructive",
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const columns = useMemo(
     () => [
       {
@@ -788,15 +842,26 @@ export default function CustomerOrderHistory() {
   );
 
   const actions = (order: Order) => (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="h-8 w-8"
-      onClick={() => setViewOrder(order)}
-      title="View"
-    >
-      <Eye className="h-4 w-4" />
-    </Button>
+    <div className="flex items-center gap-1">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8"
+        onClick={() => setViewOrder(order)}
+        title="View Details"
+      >
+        <Eye className="h-4 w-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+        onClick={() => setDeleteTarget(order)}
+        title="Delete Order"
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
+    </div>
   );
 
   const tableData = useMemo(() => orders, [orders]);
@@ -1365,12 +1430,57 @@ export default function CustomerOrderHistory() {
                       Mark Assembled
                     </Button>
                   ) : null}
+
+                  <Button
+                    variant="destructive"
+                    disabled={actionId === viewOrder._id}
+                    onClick={() => setDeleteTarget(viewOrder)}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete Order
+                  </Button>
                 </div>
               </>
             )}
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ✅ Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Order</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to permanently delete order{" "}
+              <span className="font-semibold text-foreground font-mono">
+                {deleteTarget ? orderShortId(deleteTarget._id) : ""}
+              </span>
+              ? This action cannot be undone and will permanently remove this order from the database.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault();
+                handleDeleteOrder();
+              }}
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete Order"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AdminLayout>
   );
 }

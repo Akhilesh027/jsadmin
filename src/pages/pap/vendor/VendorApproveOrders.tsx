@@ -4,7 +4,7 @@ import { AdminLayout } from "@/components/layout/AdminLayout";
 import { DataTable } from "@/components/ui/data-table";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
-import { Check, X, Eye } from "lucide-react";
+import { Check, X, Eye, Trash2, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 
 import {
@@ -13,6 +13,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 import {
   Select,
@@ -185,6 +196,8 @@ export function VendorApproveOrders() {
 
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<Order | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Order | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const filteredOrders = useMemo(() => {
     const list = [...orders];
@@ -322,6 +335,43 @@ export function VendorApproveOrders() {
     }
   };
 
+  const handleDeleteOrder = async () => {
+    if (!deleteTarget) return;
+    try {
+      setDeleting(true);
+      const token = getAdminToken();
+      const res = await fetch(`${API_BASE}/api/admin/vendor-orders/${deleteTarget._id}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || "Failed to delete vendor order");
+
+      toast({
+        title: "Order Deleted",
+        description: `Vendor order #${deleteTarget.orderNumber || deleteTarget._id.slice(-6)} deleted successfully.`,
+      });
+
+      if (selected?._id === deleteTarget._id) {
+        setOpen(false);
+        setSelected(null);
+      }
+      setDeleteTarget(null);
+      fetchOrders();
+    } catch (err: any) {
+      toast({
+        title: "Delete failed",
+        description: err?.message || "Could not delete vendor order",
+        variant: "destructive",
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const openView = (order: Order) => {
     setSelected(order);
     setOpen(true);
@@ -401,13 +451,13 @@ export function VendorApproveOrders() {
   ];
 
   const actions = (order: Order) => (
-    <div className="flex gap-1">
+    <div className="flex items-center gap-1">
       <Button
         variant="ghost"
         size="icon"
         className="h-8 w-8"
         onClick={() => openView(order)}
-        title="View"
+        title="View Details"
       >
         <Eye className="h-4 w-4" />
       </Button>
@@ -415,7 +465,7 @@ export function VendorApproveOrders() {
       <Button
         variant="ghost"
         size="icon"
-        className="h-8 w-8 text-success"
+        className="h-8 w-8 text-success hover:text-success hover:bg-success/10"
         disabled={actionId === order._id}
         onClick={() => handleApprove(order)}
         title="Approve"
@@ -426,12 +476,22 @@ export function VendorApproveOrders() {
       <Button
         variant="ghost"
         size="icon"
-        className="h-8 w-8 text-destructive"
+        className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
         disabled={actionId === order._id}
         onClick={() => handleReject(order)}
         title="Reject"
       >
         <X className="h-4 w-4" />
+      </Button>
+
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+        onClick={() => setDeleteTarget(order)}
+        title="Delete Order"
+      >
+        <Trash2 className="h-4 w-4" />
       </Button>
     </div>
   );
@@ -785,11 +845,56 @@ export function VendorApproveOrders() {
                     </Button>
                   </>
                 ) : null}
+
+                <Button
+                  variant="destructive"
+                  disabled={actionId === selected._id}
+                  onClick={() => setDeleteTarget(selected)}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Order
+                </Button>
               </div>
             </div>
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ✅ Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Vendor Order</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to permanently delete vendor order{" "}
+              <span className="font-semibold text-foreground font-mono">
+                {deleteTarget ? `#${deleteTarget.orderNumber || deleteTarget._id.slice(-6)}` : ""}
+              </span>
+              ? This action cannot be undone and will permanently remove this order from the database.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault();
+                handleDeleteOrder();
+              }}
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete Order"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AdminLayout>
   );
 }

@@ -86,7 +86,10 @@ const manufacturerAdminNav: NavItem[] = [
 
 const vendorAdminNav: NavItem[] = [
   { title: "Dashboard", href: "/pap/vendor", icon: LayoutDashboard },
-  { title: "Estimates", href: "/pap/vendor/reports", icon: BarChart3 },
+  { title: "Approve Orders", href: "/pap/vendor/orders/approve", icon: ShoppingCart },
+  { title: "Track Orders", href: "/pap/vendor/orders/track", icon: Truck },
+  { title: "Order History", href: "/pap/vendor/orders/history", icon: History },
+  { title: "Reports", href: "/pap/vendor/reports", icon: BarChart3 },
   { title: "Vendor List", href: "/pap/vendor/list", icon: Store },
 ];
 
@@ -95,6 +98,8 @@ const ecommerceAdminNav: NavItem[] = [
   { title: "Customer Orders", href: "/eap/orders/approve", icon: ShoppingCart },
   { title: "Order History", href: "/eap/orders/history", icon: History },
   { title: "Track Orders", href: "/eap/orders/track", icon: Truck },
+  { title: "Interior Inquiries", href: "/cap/interior-inquiries", icon: Sparkles },
+  { title: "Estimates", href: "/admin/estimates", icon: FileText },
   { title: "Reports", href: "/eap/reports", icon: BarChart3 },
   { title: "Legal Pages", href: "/eap/legal-pages", icon: FileText },
   { title: "Customer List", href: "/eap/customers", icon: Users },

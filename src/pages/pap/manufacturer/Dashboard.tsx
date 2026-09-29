@@ -224,7 +224,7 @@ export default function ManufacturerDashboard() {
         <div className="bg-card rounded-xl border border-border p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold">Recent Catalog Submissions</h3>
-            <Link to="/admin/manufacturers/catalogs">
+            <Link to="/pap/manufacturer/catalog">
               <Button variant="ghost" size="sm">
                 View All
               </Button>
@@ -268,7 +268,7 @@ export default function ManufacturerDashboard() {
         <div className="bg-card rounded-xl border border-border p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold">Manufacturer Tickets</h3>
-            <Link to="/admin/manufacturers/tickets">
+            <Link to="/pap/manufacturer/tickets">
               <Button variant="ghost" size="sm">
                 View All
               </Button>

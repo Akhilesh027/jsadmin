@@ -4,9 +4,19 @@ import { AdminLayout } from "@/components/layout/AdminLayout";
 import { DataTable } from "@/components/ui/data-table";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
-import { Check, X, Eye } from "lucide-react";
+import { Check, X, Eye, Trash2, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type Segment = "all" | "affordable" | "midrange" | "luxury";
@@ -136,6 +146,14 @@ type OrderResponse = {
   order?: Order;
   data?: Order;
 };
+
+async function safeJson(res: Response) {
+  try {
+    return await res.json();
+  } catch {
+    return {};
+  }
+}
 
 async function api<T>(url: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem("token");
@@ -278,6 +296,8 @@ export function CustomerApproveOrders() {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<Order | null>(null);
   const [loadingSelected, setLoadingSelected] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Order | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -473,6 +493,56 @@ export function CustomerApproveOrders() {
     }
   };
 
+  const handleDeleteOrder = async () => {
+    if (!deleteTarget) return;
+    try {
+      setDeleting(true);
+      const orderId = deleteTarget._id;
+      const seg = segmentFromOrder(deleteTarget);
+      const base = SEGMENT_API[seg] || `${API_ROOT}/orders`;
+
+      let res = await fetch(`${base}/${orderId}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          ...(localStorage.getItem("token") ? { Authorization: `Bearer ${localStorage.getItem("token")}` } : {}),
+        },
+      });
+      if (!res.ok && res.status === 404) {
+        res = await fetch(`${API_ROOT}/orders/${orderId}`, {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            ...(localStorage.getItem("token") ? { Authorization: `Bearer ${localStorage.getItem("token")}` } : {}),
+          },
+        });
+      }
+
+      const data = await safeJson(res);
+      if (!res.ok) throw new Error(data?.message || "Failed to delete order");
+
+      toast({
+        title: "Order Deleted",
+        description: "The order has been deleted successfully.",
+      });
+
+      if (selected?._id === orderId) {
+        setOpen(false);
+        setSelected(null);
+      }
+      setDeleteTarget(null);
+      fetchOrders();
+    } catch (err: any) {
+      toast({
+        title: "Delete failed",
+        description: err?.message || "Could not delete order",
+        variant: "destructive",
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const columns = useMemo(
     () => [
       {
@@ -517,8 +587,8 @@ export function CustomerApproveOrders() {
   );
 
   const actions = (order: Order) => (
-    <div className="flex gap-1">
-      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openView(order)} title="View">
+    <div className="flex items-center gap-1">
+      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openView(order)} title="View Details">
         <Eye className="h-4 w-4" />
       </Button>
 
@@ -527,7 +597,7 @@ export function CustomerApproveOrders() {
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 text-success"
+            className="h-8 w-8 text-success hover:text-success hover:bg-success/10"
             disabled={actionId === order._id}
             onClick={() => handleApprove(order)}
             title="Approve"
@@ -538,7 +608,7 @@ export function CustomerApproveOrders() {
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 text-destructive"
+            className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
             disabled={actionId === order._id}
             onClick={() => handleReject(order)}
             title="Reject"
@@ -547,6 +617,16 @@ export function CustomerApproveOrders() {
           </Button>
         </>
       ) : null}
+
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+        onClick={() => setDeleteTarget(order)}
+        title="Delete Order"
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
     </div>
   );
 
@@ -853,11 +933,56 @@ export function CustomerApproveOrders() {
                     </Button>
                   </>
                 ) : null}
+
+                <Button
+                  variant="destructive"
+                  disabled={actionId === selected._id}
+                  onClick={() => setDeleteTarget(selected)}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Order
+                </Button>
               </div>
             </div>
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ✅ Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Order</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to permanently delete order{" "}
+              <span className="font-semibold text-foreground font-mono">
+                {deleteTarget ? `#${deleteTarget._id.slice(-6).toUpperCase()}` : ""}
+              </span>
+              ? This action cannot be undone and will permanently remove this order from the database.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault();
+                handleDeleteOrder();
+              }}
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete Order"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AdminLayout>
   );
 }

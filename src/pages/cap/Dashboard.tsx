@@ -14,6 +14,8 @@ import {
   Clock,
   Eye,
   RefreshCw,
+  Sparkles,
+  FileText,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "@/hooks/use-toast";
@@ -190,7 +192,7 @@ export default function CAPDashboard() {
       </div>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
         <Link
           to="/cap/admins/add"
           className="stat-card flex items-center gap-4 hover:border-primary/50 border border-transparent"
@@ -205,7 +207,7 @@ export default function CAPDashboard() {
         </Link>
 
         <Link
-          to="/cap/manufacturers"
+          to="/pap/manufacturer/catalog"
           className="stat-card flex items-center gap-4 hover:border-primary/50 border border-transparent"
         >
           <div className="h-12 w-12 rounded-xl bg-warning/10 flex items-center justify-center">
@@ -218,7 +220,7 @@ export default function CAPDashboard() {
         </Link>
 
         <Link
-          to="/cap/vendors"
+          to="/eap/orders/track"
           className="stat-card flex items-center gap-4 hover:border-primary/50 border border-transparent"
         >
           <div className="h-12 w-12 rounded-xl bg-success/10 flex items-center justify-center">
@@ -230,6 +232,44 @@ export default function CAPDashboard() {
           </div>
         </Link>
 
+        <Link
+          to="/cap/vendors"
+          className="stat-card flex items-center gap-4 hover:border-primary/50 border border-transparent"
+        >
+          <div className="h-12 w-12 rounded-xl bg-accent/20 flex items-center justify-center">
+            <Store className="h-6 w-6 text-foreground" />
+          </div>
+          <div>
+            <p className="font-semibold text-foreground">{formatNumber(dash.totalVendors)} Vendors</p>
+            <p className="text-sm text-muted-foreground">Manage all vendors</p>
+          </div>
+        </Link>
+
+        <Link
+          to="/cap/interior-inquiries"
+          className="stat-card flex items-center gap-4 hover:border-primary/50 border border-transparent bg-gradient-to-br from-amber-500/5 to-primary/5"
+        >
+          <div className="h-12 w-12 rounded-xl bg-amber-500/10 flex items-center justify-center">
+            <Sparkles className="h-6 w-6 text-amber-600 dark:text-amber-400" />
+          </div>
+          <div>
+            <p className="font-semibold text-foreground">Interior Inquiries</p>
+            <p className="text-sm text-muted-foreground">3D Consultation Leads</p>
+          </div>
+        </Link>
+
+        <Link
+          to="/admin/estimates"
+          className="stat-card flex items-center gap-4 hover:border-primary/50 border border-transparent"
+        >
+          <div className="h-12 w-12 rounded-xl bg-sky-500/10 flex items-center justify-center">
+            <FileText className="h-6 w-6 text-sky-600 dark:text-sky-400" />
+          </div>
+          <div>
+            <p className="font-semibold text-foreground">Estimates</p>
+            <p className="text-sm text-muted-foreground">Customer Quotes</p>
+          </div>
+        </Link>
       </div>
 
       {/* Recent Activity */}
